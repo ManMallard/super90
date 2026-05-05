@@ -490,7 +490,11 @@ static void updateScreen(uiEvent_t *ev, bool forceRedraw)
 
 				if (keypadInputDigitsLength == 0)
 				{
-					bool locIsValid = settingsLocationIsValid();
+					/* AES patch: hide GPS-derived location when GPS is OFF
+					 * (the cached lat/lon survives gpsOff() so settingsLocationIsValid()
+					 * keeps returning true even after the user disables GPS). */
+					bool locIsValid = settingsLocationIsValid()
+					                  && (SETTINGS_GPS_MODE_GET(nonVolatileSettings) >= GPS_MODE_ON);
 
 					buildLocationAndMaidenheadStrings(buffer, maidenheadBuf, locIsValid);
 

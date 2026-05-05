@@ -1,6 +1,9 @@
 /*
  * Encryption Keys top-level menu — lists 16 slots, lets the user
  * open any slot for entry. Each slot displays its label or "<empty>".
+ *
+ * Uses the standard menuDisplayTitle / menuDisplayEntry pattern so the
+ * font size and theming match the rest of the menus.
  */
 #include <string.h>
 #include <stdio.h>
@@ -16,62 +19,95 @@
 
 extern void menuKeyEntry_passphrase(uint8_t slot1based);
 
-static int s_cursor = 0;
+static void updateScreen(void);
+static void handleEvent(uiEvent_t *ev);
 
-static void render(void)
-{
-    char line[20];
-    displayClearBuf();
-    displayPrintCentered(0, "Encryption Keys", FONT_SIZE_2);
-
-    int rowsToShow = 5;
-    int top = s_cursor - 2;
-    if (top < 0) top = 0;
-    if (top > KEY_SLOT_COUNT - rowsToShow) top = KEY_SLOT_COUNT - rowsToShow;
-
-    for (int i = 0; i < rowsToShow; ++i) {
-        int slot = top + i;
-        if (slot >= KEY_SLOT_COUNT) break;
-        const KeySlot_t *ks = keystore_get((uint8_t)(slot + 1));
-        if (ks && (ks->flags & KEY_FLAG_SET) && ks->label[0]) {
-            char tmp[KEY_LABEL_LEN + 1] = {0};
-            memcpy(tmp, ks->label, KEY_LABEL_LEN);
-            snprintf(line, sizeof(line), "%2d: %s", slot + 1, tmp);
-        } else {
-            snprintf(line, sizeof(line), "%2d: <empty>", slot + 1);
-        }
-        bool sel = (slot == s_cursor);
-        if (sel) displayFillRect(0, 16 + (i * 10), 132, 10, false);
-        displayPrintAt(2, 16 + (i * 10), line, FONT_SIZE_1);
-    }
-    displayRender();
-}
+static menuStatus_t menuKeyManagementExitCode = MENU_STATUS_SUCCESS;
 
 menuStatus_t menuKeyManagement(uiEvent_t *ev, bool isFirstRun)
 {
-    if (isFirstRun) {
-        keystore_init();
-        s_cursor = 0;
-        render();
-        return MENU_STATUS_SUCCESS;
-    }
-    if (ev->hasEvent) {
-        if (KEYCHECK_PRESS(ev->keys, KEY_DOWN)) {
-            if (s_cursor < KEY_SLOT_COUNT - 1) s_cursor++;
-            render();
-        } else if (KEYCHECK_PRESS(ev->keys, KEY_UP)) {
-            if (s_cursor > 0) s_cursor--;
-            render();
-        } else if (KEYCHECK_SHORTUP(ev->keys, KEY_GREEN)) {
-            menuKeyEntry_passphrase((uint8_t)(s_cursor + 1));
-            return MENU_STATUS_SUCCESS;
-        } else if (KEYCHECK_SHORTUP(ev->keys, KEY_RED)) {
-            menuSystemPopPreviousMenu();
-            return MENU_STATUS_SUCCESS;
-        } else if (KEYCHECK_LONGDOWN(ev->keys, KEY_HASH)) {
-            keystore_clear((uint8_t)(s_cursor + 1));
-            render();
-        }
-    }
-    return MENU_STATUS_SUCCESS;
+	if (isFirstRun)
+	{
+		keystore_init();
+		menuDataGlobal.numItems = KEY_SLOT_COUNT;
+		if (menuDataGlobal.currentItemIndex < 0
+		    || menuDataGlobal.currentItemIndex >= KEY_SLOT_COUNT)
+		{
+			menuDataGlobal.currentItemIndex = 0;
+		}
+		updateScreen();
+		return (MENU_STATUS_LIST_TYPE | MENU_STATUS_SUCCESS);
+	}
+
+	menuKeyManagementExitCode = MENU_STATUS_SUCCESS;
+	if (ev->hasEvent)
+	{
+		handleEvent(ev);
+	}
+	return menuKeyManagementExitCode;
+}
+
+static void updateScreen(void)
+{
+	displayClearBuf();
+	menuDisplayTitle(currentLanguage->enc_keys);
+
+	for (int i = MENU_START_ITERATION_VALUE; i <= MENU_END_ITERATION_VALUE; i++)
+	{
+		int mNum = menuGetMenuOffset(KEY_SLOT_COUNT, i);
+		if (mNum == MENU_OFFSET_BEFORE_FIRST_ENTRY)
+		{
+			continue;
+		}
+		else if (mNum == MENU_OFFSET_AFTER_LAST_ENTRY)
+		{
+			break;
+		}
+
+		char buf[SCREEN_LINE_BUFFER_SIZE];
+		const KeySlot_t *ks = keystore_get((uint8_t)(mNum + 1));
+		if (ks && (ks->flags & KEY_FLAG_SET) && ks->label[0])
+		{
+			char lab[KEY_LABEL_LEN + 1] = {0};
+			memcpy(lab, ks->label, KEY_LABEL_LEN);
+			snprintf(buf, sizeof(buf), "%2d: %s", mNum + 1, lab);
+		}
+		else
+		{
+			snprintf(buf, sizeof(buf), "%2d: <empty>", mNum + 1);
+		}
+		menuDisplayEntry(i, mNum, buf, 0,
+		                 THEME_ITEM_FG_MENU_ITEM,
+		                 THEME_ITEM_COLOUR_NONE,
+		                 THEME_ITEM_BG);
+	}
+
+	displayRender();
+}
+
+static void handleEvent(uiEvent_t *ev)
+{
+	if (KEYCHECK_PRESS(ev->keys, KEY_DOWN))
+	{
+		menuSystemMenuIncrement(&menuDataGlobal.currentItemIndex, KEY_SLOT_COUNT);
+		updateScreen();
+	}
+	else if (KEYCHECK_PRESS(ev->keys, KEY_UP))
+	{
+		menuSystemMenuDecrement(&menuDataGlobal.currentItemIndex, KEY_SLOT_COUNT);
+		updateScreen();
+	}
+	else if (KEYCHECK_SHORTUP(ev->keys, KEY_GREEN))
+	{
+		menuKeyEntry_passphrase((uint8_t)(menuDataGlobal.currentItemIndex + 1));
+	}
+	else if (KEYCHECK_SHORTUP(ev->keys, KEY_RED))
+	{
+		menuSystemPopPreviousMenu();
+	}
+	else if (KEYCHECK_LONGDOWN(ev->keys, KEY_HASH))
+	{
+		keystore_clear((uint8_t)(menuDataGlobal.currentItemIndex + 1));
+		updateScreen();
+	}
 }

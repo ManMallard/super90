@@ -35,7 +35,7 @@
 #else
 #define LANGUAGE_TAG_MAGIC_NUMBER { 'G', 'D', '7', '7' }, { 'L', 'A', 'N', 'G' } // Never change this tag.
 #endif
-#define LANGUAGE_TAG_VERSION      { 0x00, 0x00, 0x00, 0x05 } // Bump the version each time the language struct is changed
+#define LANGUAGE_TAG_VERSION      { 0x00, 0x00, 0x00, 0x06 } // Bump the version each time the language struct is changed
 
 typedef struct
 {
@@ -335,6 +335,7 @@ typedef struct
    const char text_size[LANGUAGE_TEXTS_LENGTH];
    const char last_talker[LANGUAGE_TEXTS_LENGTH];
    const char mute[LANGUAGE_TEXTS_LENGTH];
+   const char enc_keys[LANGUAGE_TEXTS_LENGTH];/* AES patch: 'Enc Keys' menu label */
 } stringsTable_t;
 
 #endif // _OPENGD77_UILANGUAGE_H_

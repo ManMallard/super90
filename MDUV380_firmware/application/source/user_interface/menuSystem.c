@@ -29,6 +29,7 @@
 #include "user_interface/menuSystem.h"
 #include "user_interface/uiLocalisation.h"
 #include "user_interface/uiUtilities.h"
+#include <stddef.h>   /* offsetof — for AES patch enc_keys string offset */
 
 menuDataGlobal_t menuDataGlobal =
 {
@@ -107,6 +108,8 @@ menuDataGlobal_t menuDataGlobal =
 				NULL,// Theme items browser
 				NULL,// Colour picker
 #endif
+			NULL,// Encryption Keys (AES patch)
+			NULL,// Encryption Key Entry (AES patch)
 		}
 };
 
@@ -661,7 +664,7 @@ const menuItemNewData_t mainMenuItems[] =
 #if defined(HAS_GPS)
 	{ 195, MENU_GPS		        },
 #endif
-	{   2, MENU_KEY_MANAGEMENT  }, /* AES patch: shows "Credits" placeholder */
+	{ ((offsetof(stringsTable_t, enc_keys) - offsetof(stringsTable_t, LANGUAGE_NAME)) / LANGUAGE_TEXTS_LENGTH), MENU_KEY_MANAGEMENT  }, /* AES patch: 'Enc Keys' menu label */
 };
 
 const menuItemsList_t menuDataMainMenu =

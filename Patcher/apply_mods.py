@@ -370,7 +370,45 @@ def mod_menuSystem_c() -> None:
 
 
 # ---------------------------------------------------------------------------
-# 5. menuChannelDetails.c — Block C (enum), D (render), E (LEFT/RIGHT)
+# 4b. menuSystem.c — add NULL entries to menuDataGlobal.data[] for our menus
+# ---------------------------------------------------------------------------
+def mod_menuSystem_c_data() -> None:
+    p = SRC / "user_interface" / "menuSystem.c"
+    if not p.exists():
+        return
+    src = read(p)
+    if "// Encryption Keys (AES patch)" in src:
+        return
+    # The .data initializer is part of `menuDataGlobal_t menuDataGlobal = { ... }`
+    # Find the `.data ` field, then find its `{` and brace-match to its `}`.
+    m = re.search(r"\.data\s*=\s*\{", src)
+    if not m:
+        todo("menuSystem.c: could not find menuDataGlobal.data[] initializer - "
+             "add `NULL,// Encryption Keys (AES patch)` and `NULL,// Encryption Key Entry (AES patch)` "
+             "at the end of the .data = { ... } block in menuDataGlobal manually")
+        return
+    depth = 1
+    i = m.end()
+    while i < len(src) and depth > 0:
+        if src[i] == "{":
+            depth += 1
+        elif src[i] == "}":
+            depth -= 1
+            if depth == 0:
+                break
+        i += 1
+    if depth != 0:
+        todo("menuSystem.c: brace match failed in .data initializer")
+        return
+    close_idx = i
+    line_start = src.rfind("\n", 0, close_idx) + 1
+    payload = (
+        "\t\t\tNULL,// Encryption Keys (AES patch)\n"
+        "\t\t\tNULL,// Encryption Key Entry (AES patch)\n"
+    )
+    src = src[:line_start] + payload + src[line_start:]
+    write(p, src)
+    print("  menuSystem.c: appended NULL entries to menuDataGlobal.data[]")
 # ---------------------------------------------------------------------------
 def mod_menuChannelDetails() -> None:
     p = SRC / "user_interface" / "menuChannelDetails.c"
@@ -695,6 +733,174 @@ def mod_codec_blx_fix() -> None:
         return
     write(c, new_src)
     print(f"  codec_interface.c: replaced {count} BL <literal> call(s) with LDR/BLX")
+
+
+# ---------------------------------------------------------------------------
+# 9. menuRadioInfos.c — gate location validity on GPS being on
+# ---------------------------------------------------------------------------
+def mod_radioInfos_gps_check() -> None:
+    p = SRC / "user_interface" / "menuRadioInfos.c"
+    if not p.exists():
+        return
+    src = read(p)
+    if "AES patch: hide GPS-derived location when GPS is OFF" in src:
+        return
+    old = "\t\t\t\tif (keypadInputDigitsLength == 0)\n\t\t\t\t{\n\t\t\t\t\tbool locIsValid = settingsLocationIsValid();"
+    new = (
+        "\t\t\t\tif (keypadInputDigitsLength == 0)\n\t\t\t\t{\n"
+        "\t\t\t\t\t/* AES patch: hide GPS-derived location when GPS is OFF\n"
+        "\t\t\t\t\t * (the cached lat/lon survives gpsOff() so settingsLocationIsValid()\n"
+        "\t\t\t\t\t * keeps returning true even after the user disables GPS). */\n"
+        "\t\t\t\t\tbool locIsValid = settingsLocationIsValid()\n"
+        "\t\t\t\t\t                  && (SETTINGS_GPS_MODE_GET(nonVolatileSettings) >= GPS_MODE_ON);"
+    )
+    if old not in src:
+        todo("menuRadioInfos.c: could not find `bool locIsValid = settingsLocationIsValid();` "
+             "anchor for GPS-off gating - add the GPS_MODE_ON check manually")
+        return
+    write(p, src.replace(old, new, 1))
+    print("  menuRadioInfos.c: location now requires GPS_MODE_ON")
+
+
+# ---------------------------------------------------------------------------
+# 10. menuFirmwareInfoScreen.c — strip contributor names from credits page
+# ---------------------------------------------------------------------------
+def mod_firmware_info_strip_names() -> None:
+    p = SRC / "user_interface" / "menuFirmwareInfoScreen.c"
+    if not p.exists():
+        return
+    src = read(p)
+    if "AES patch: contributor names removed" in src:
+        return
+    # Anchor on the start of the array; brace-match to its `};`
+    m = re.search(r"static\s+const\s+char\s*\*\s*creditTexts\s*\[\s*\]\s*=\s*\{", src)
+    if not m:
+        return
+    # Find the closing `};` of the array. Use brace-depth counting.
+    depth = 1
+    i = m.end()
+    while i < len(src) and depth > 0:
+        if src[i] == "{":
+            depth += 1
+        elif src[i] == "}":
+            depth -= 1
+            if depth == 0:
+                break
+        i += 1
+    if depth != 0:
+        todo("menuFirmwareInfoScreen.c: could not locate end of creditTexts[] array")
+        return
+    # Also include the trailing `;` which sits immediately after the `}`.
+    end = i + 1
+    while end < len(src) and src[end] != ";":
+        end += 1
+    end += 1  # consume the semicolon
+    replacement = (
+        "static const char *creditTexts[] =\n"
+        "{\n"
+        "\t\t\"\" /* AES patch: contributor names removed */\n"
+        "};"
+    )
+    write(p, src[:m.start()] + replacement + src[end:])
+    print("  menuFirmwareInfoScreen.c: stripped contributor names from creditTexts[]")
+
+
+# ---------------------------------------------------------------------------
+# 11. uiLanguage.h + english.h — add `enc_keys` string and bump struct version
+# ---------------------------------------------------------------------------
+def mod_lang_enc_keys() -> None:
+    # 11a. Bump LANGUAGE_TAG_VERSION 0x05 -> 0x06.
+    h = INC / "user_interface" / "languages" / "uiLanguage.h"
+    if h.exists():
+        src = read(h)
+        if "enc_keys" not in src:
+            new_src = src.replace(
+                "#define LANGUAGE_TAG_VERSION      { 0x00, 0x00, 0x00, 0x05 }",
+                "#define LANGUAGE_TAG_VERSION      { 0x00, 0x00, 0x00, 0x06 }",
+                1,
+            )
+            # Append enc_keys field as the last char[] in the struct.
+            anchor = "   const char mute[LANGUAGE_TEXTS_LENGTH];\n} stringsTable_t;"
+            replacement = (
+                "   const char mute[LANGUAGE_TEXTS_LENGTH];\n"
+                "   const char enc_keys[LANGUAGE_TEXTS_LENGTH];/* AES patch: 'Enc Keys' menu label */\n"
+                "} stringsTable_t;"
+            )
+            if anchor in new_src:
+                new_src = new_src.replace(anchor, replacement, 1)
+                write(h, new_src)
+                print("  uiLanguage.h: added enc_keys field, bumped struct version 5 -> 6")
+            else:
+                todo("uiLanguage.h: could not locate `mute` field as last entry - "
+                     "append `const char enc_keys[LANGUAGE_TEXTS_LENGTH];` to stringsTable_t manually "
+                     "and bump LANGUAGE_TAG_VERSION")
+        else:
+            print("  uiLanguage.h: enc_keys already present, skipping")
+
+    # 11b. english.h — add `.enc_keys = "Enc Keys"` after `.mute = ...`
+    e = INC / "user_interface" / "languages" / "english.h"
+    if e.exists():
+        src = read(e)
+        if "enc_keys" not in src:
+            anchor = '.mute\t\t\t\t\t= "Mute", // MaxLen: 16 (with \':\' + .on or .off)\n};'
+            replacement = (
+                '.mute\t\t\t\t\t= "Mute", // MaxLen: 16 (with \':\' + .on or .off)\n'
+                '.enc_keys\t\t\t\t= "Enc Keys", // MaxLen: 16 -- AES patch\n'
+                '};'
+            )
+            if anchor in src:
+                write(e, src.replace(anchor, replacement, 1))
+                print("  english.h: added .enc_keys = \"Enc Keys\"")
+            else:
+                # Tolerant fallback: just add before the final `};`
+                m = re.search(r"\.mute\b[^;]*?;\s*\n\}", src)
+                if m:
+                    insert_at = m.end() - 1  # before the `}`
+                    new_src = (
+                        src[:insert_at]
+                        + '.enc_keys\t\t\t\t= "Enc Keys", // MaxLen: 16 -- AES patch\n'
+                        + src[insert_at:]
+                    )
+                    write(e, new_src)
+                    print("  english.h: added .enc_keys = \"Enc Keys\" (fallback path)")
+                else:
+                    todo("english.h: could not place .enc_keys initializer - add `.enc_keys = \"Enc Keys\",` "
+                         "to the englishLanguage struct manually")
+        else:
+            print("  english.h: enc_keys already present, skipping")
+
+    # 11c. menuSystem.c — add #include <stddef.h> and update mainMenuItems[]
+    #      stringOffset for MENU_KEY_MANAGEMENT to use offsetof().
+    c = SRC / "user_interface" / "menuSystem.c"
+    if not c.exists():
+        return
+    src = read(c)
+    changed = False
+
+    # Add #include <stddef.h> if not present.
+    if "#include <stddef.h>" not in src:
+        anchor = '#include "user_interface/uiUtilities.h"'
+        if anchor in src:
+            src = src.replace(
+                anchor,
+                anchor + '\n#include <stddef.h>   /* offsetof — for AES patch enc_keys string offset */',
+                1,
+            )
+            changed = True
+
+    # Update the placeholder stringOffset 2 -> offsetof(...) calculation.
+    old_entry = '{   2, MENU_KEY_MANAGEMENT  }, /* AES patch: shows "Credits" placeholder */'
+    new_entry = '{ ((offsetof(stringsTable_t, enc_keys) - offsetof(stringsTable_t, LANGUAGE_NAME)) / LANGUAGE_TEXTS_LENGTH), MENU_KEY_MANAGEMENT  }, /* AES patch: \'Enc Keys\' menu label */'
+    if old_entry in src:
+        src = src.replace(old_entry, new_entry, 1)
+        changed = True
+        print("  menuSystem.c: mainMenuItems[] now uses offsetof for enc_keys")
+    elif "offsetof(stringsTable_t, enc_keys)" not in src:
+        todo("menuSystem.c: could not retarget mainMenuItems[] entry to enc_keys")
+    if changed:
+        write(c, src)
+
+
 def verify_new_files() -> None:
     expected = [
         SRC / "crypto" / "aes.c",
@@ -743,9 +949,13 @@ def main() -> int:
     mod_hrc6000()
     mod_menuSystem_h()
     mod_menuSystem_c()
+    mod_menuSystem_c_data()
     mod_menuChannelDetails()
     mod_uiUtilities()
     mod_codec_blx_fix()
+    mod_radioInfos_gps_check()
+    mod_firmware_info_strip_names()
+    mod_lang_enc_keys()
 
     write_todo()
     if todo_lines:

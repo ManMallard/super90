@@ -1,2 +1,2 @@
-../application/source/user_interface/menuKeyManagement.c:21:13:render	80	static
-../application/source/user_interface/menuKeyManagement.c:50:14:menuKeyManagement	8	static
+../application/source/user_interface/menuKeyManagement.c:50:13:updateScreen	80	static
+../application/source/user_interface/menuKeyManagement.c:27:14:menuKeyManagement	8	static
