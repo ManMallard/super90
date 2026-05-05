@@ -45,6 +45,7 @@
 #if defined(HAS_GPS)
 #if defined(PLATFORM_MD380) || defined(PLATFORM_MDUV380) || defined(PLATFORM_RT84_DM1701) || defined(PLATFORM_MD2017)
 #include "interfaces/gps.h"
+#include "crypto/enc_indicator.h"
 #endif
 #endif
 
@@ -2222,6 +2223,7 @@ void uiUtilityRenderHeader(bool isVFODualWatchScanning, bool isVFOSweepScanning,
 	}
 
 	displayThemeResetToDefault();
+	enc_indicator_render();
 }
 
 void uiUtilityRedrawHeaderOnly(bool isVFODualWatchScanning, bool isVFOSweepScanning, bool forceBatteryDisplay)

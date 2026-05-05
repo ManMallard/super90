@@ -1,0 +1,9 @@
+../application/source/crypto/dmr_crypto.c:36:6:dmr_crypto_make_nonce	1
+../application/source/crypto/dmr_crypto.c:51:6:dmr_crypto_tx_init	1
+../application/source/crypto/dmr_crypto.c:59:6:dmr_crypto_tx_clear	1
+../application/source/crypto/dmr_crypto.c:60:6:dmr_crypto_tx_active	1
+../application/source/crypto/dmr_crypto.c:62:6:dmr_crypto_rx_init	1
+../application/source/crypto/dmr_crypto.c:70:6:dmr_crypto_rx_clear	1
+../application/source/crypto/dmr_crypto.c:71:6:dmr_crypto_rx_active	1
+../application/source/crypto/dmr_crypto.c:73:6:dmr_crypto_tx_frame	3
+../application/source/crypto/dmr_crypto.c:81:6:dmr_crypto_rx_frame	3

@@ -1,428 +1,761 @@
 #!/usr/bin/env python3
 """
-apply_mods.py — anchored text modifications for the AES-256 OpenGD77 patch.
+apply_mods.py — applies AES-256 encryption patch to OpenGD77/OpenMDUV380
+                source tree (STM32F4 build, MDUV380_firmware/application/).
 
-Each operation finds a regex anchor in a target file and either inserts text
-before/after the match or replaces a region. Failures print the intended change
-so a human can apply it manually.
+Idempotent: each modification checks for a sentinel marker before inserting,
+so re-running this on a partially-patched tree won't duplicate anything.
+
+Anything that can't be patched safely is appended as a manual TODO to
+AES_PATCH_TODO.md in the repo root.
+
+Usage:
+    python apply_mods.py <repo_root>
 """
-import os, re, sys, argparse, textwrap
+from __future__ import annotations
 
-class ModFailed(Exception): pass
+import io
+import os
+import re
+import sys
+from pathlib import Path
+from typing import Callable
 
-def read(p):  return open(p, 'r', encoding='utf-8', errors='replace').read()
-def write(p, s): open(p, 'w', encoding='utf-8').write(s)
+REPO: Path
+APP: Path           # MDUV380_firmware/application
+SRC: Path           # MDUV380_firmware/application/source
+INC: Path           # MDUV380_firmware/application/include
+TODO_PATH: Path
+todo_lines: list[str] = []
 
-def insert_after(path, anchor_re, payload, label):
-    src = read(path)
-    m = re.search(anchor_re, src, re.MULTILINE)
-    if not m:
-        raise ModFailed(f"[{label}] anchor not found in {path}: /{anchor_re}/")
-    if payload.strip() in src:
-        print(f"[{label}] already applied, skipping")
+
+def todo(msg: str) -> None:
+    todo_lines.append(f"- {msg}")
+    print(f"  [TODO] {msg}")
+
+
+def write_todo() -> None:
+    if not todo_lines:
+        if TODO_PATH.exists():
+            TODO_PATH.unlink()
         return
-    cut = m.end()
-    write(path, src[:cut] + "\n" + payload + "\n" + src[cut:])
-    print(f"[{label}] inserted into {path}")
+    body = "# AES Patch — Manual Edits Required\n\n"
+    body += "The automated patcher could not safely apply the items below.\n"
+    body += "Apply them by hand, then rebuild.\n\n"
+    body += "\n".join(todo_lines) + "\n"
+    TODO_PATH.write_text(body, encoding="utf-8")
 
-def insert_before(path, anchor_re, payload, label):
-    src = read(path)
-    m = re.search(anchor_re, src, re.MULTILINE)
-    if not m:
-        raise ModFailed(f"[{label}] anchor not found in {path}: /{anchor_re}/")
-    if payload.strip() in src:
-        print(f"[{label}] already applied, skipping")
+
+def read(p: Path) -> str:
+    return p.read_text(encoding="utf-8", errors="replace")
+
+
+def write(p: Path, text: str) -> None:
+    p.write_text(text, encoding="utf-8")
+
+
+def insert_once(text: str, anchor: str, payload: str, sentinel: str) -> str:
+    """Insert payload after the line containing anchor, unless sentinel is
+    already present anywhere in text. Returns modified text."""
+    if sentinel in text:
+        return text
+    idx = text.find(anchor)
+    if idx < 0:
+        raise LookupError(f"anchor not found: {anchor[:80]!r}")
+    line_end = text.find("\n", idx)
+    if line_end < 0:
+        line_end = len(text)
+    return text[:line_end + 1] + payload + text[line_end + 1:]
+
+
+def insert_before_once(text: str, anchor: str, payload: str, sentinel: str) -> str:
+    """Insert payload immediately before the start of the line containing
+    anchor, unless sentinel is present."""
+    if sentinel in text:
+        return text
+    idx = text.find(anchor)
+    if idx < 0:
+        raise LookupError(f"anchor not found: {anchor[:80]!r}")
+    line_start = text.rfind("\n", 0, idx) + 1
+    return text[:line_start] + payload + text[line_start:]
+
+
+# ---------------------------------------------------------------------------
+# 1. codeplug.h — rename _UNUSED_2 to encKeyIndex (in CodeplugChannel_t only)
+# ---------------------------------------------------------------------------
+def mod_codeplug() -> None:
+    p = INC / "functions" / "codeplug.h"
+    if not p.exists():
+        todo(f"codeplug.h not found at {p} — add `uint8_t encKeyIndex;` to CodeplugChannel_t")
         return
-    cut = m.start()
-    write(path, src[:cut] + payload + "\n" + src[cut:])
-    print(f"[{label}] inserted into {path}")
-
-def replace_region(path, start_re, end_re, payload, label):
-    src = read(path)
-    s = re.search(start_re, src, re.MULTILINE)
-    e = re.search(end_re, src, re.MULTILINE)
-    if not s or not e or e.start() <= s.end():
-        raise ModFailed(f"[{label}] region not found in {path}")
-    if payload.strip() in src:
-        print(f"[{label}] already applied, skipping")
-        return
-    write(path, src[:s.start()] + payload + src[e.end():])
-    print(f"[{label}] replaced region in {path}")
-
-# ----------------------------------------------------------------------------
-# Modifications
-# ----------------------------------------------------------------------------
-
-def find(root, *parts):
-    """Search a few common subpaths for a filename."""
-    candidates = []
-    for dirpath, _, files in os.walk(root):
-        for f in files:
-            full = os.path.join(dirpath, f)
-            if all(p in full for p in parts):
-                candidates.append(full)
-    if not candidates:
-        return None
-    candidates.sort(key=len)
-    return candidates[0]
-
-def mod_codeplug(root):
-    """Add encKeyIndex (1 byte) to struct_codeplugChannel_t.
-    Tries several reserved/pad field naming conventions in order.
-    """
-    p = find(root, 'codeplug.h')
-    if not p:
-        raise ModFailed("codeplug.h not found")
     src = read(p)
-    if 'encKeyIndex' in src:
-        print("[codeplug.h] already applied"); return
+    if "encKeyIndex" in src:
+        print("  codeplug.h: already patched")
+        return
+    # Find CodeplugChannel_t struct body and rename the _UNUSED_2 inside it.
+    m = re.search(r"typedef\s+struct\s*\{[^}]*?\}\s*CodeplugChannel_t\s*;", src, re.S)
+    if not m:
+        todo("codeplug.h: could not locate CodeplugChannel_t struct - add `uint8_t encKeyIndex;` manually")
+        return
+    body = m.group(0)
+    if "_UNUSED_2" not in body:
+        todo("codeplug.h: CodeplugChannel_t no longer has _UNUSED_2 - rename a different reserved byte to encKeyIndex")
+        return
+    new_body = body.replace(
+        "uint8_t\t\t_UNUSED_2;",
+        "uint8_t\t\tencKeyIndex; /* AES patch: 0=off, 1..16=key slot */",
+        1,
+    )
+    if new_body == body:
+        # Try without tabs
+        new_body = body.replace(
+            "uint8_t _UNUSED_2;",
+            "uint8_t encKeyIndex; /* AES patch: 0=off, 1..16=key slot */",
+            1,
+        )
+    if new_body == body:
+        todo("codeplug.h: _UNUSED_2 not found in expected form - rename a reserved byte to encKeyIndex manually")
+        return
+    src = src[:m.start()] + new_body + src[m.end():]
+    write(p, src)
+    print("  codeplug.h: renamed _UNUSED_2 -> encKeyIndex")
 
-    # Strategy A: shrink an existing pad/reserved array by 1 and add the field.
-    pats = [
-        # LibreDMR-style pad
-        (r'(\buint8_t\s+LibreDMR_Pad\[)(\d+)(\];)',
-         lambda m: f"{m.group(1)}{int(m.group(2))-1}{m.group(3)}\n\tuint8_t encKeyIndex;  /* 0=off, 1..16 = key slot */"),
-        # _unused / unused
-        (r'(\buint8_t\s+_unused\d*\[)(\d+)(\];)',
-         lambda m: f"{m.group(1)}{int(m.group(2))-1}{m.group(3)}\n\tuint8_t encKeyIndex;"),
-        (r'(\buint8_t\s+unused\d*\[)(\d+)(\];)',
-         lambda m: f"{m.group(1)}{int(m.group(2))-1}{m.group(3)}\n\tuint8_t encKeyIndex;"),
-        # reserved
-        (r'(\buint8_t\s+reserved\d*\[)(\d+)(\];)',
-         lambda m: f"{m.group(1)}{int(m.group(2))-1}{m.group(3)}\n\tuint8_t encKeyIndex;"),
-        # pad / padding
-        (r'(\buint8_t\s+pad(?:ding)?\d*\[)(\d+)(\];)',
-         lambda m: f"{m.group(1)}{int(m.group(2))-1}{m.group(3)}\n\tuint8_t encKeyIndex;"),
-    ]
-    for pat, repl in pats:
-        new, n = re.subn(pat, repl, src, count=1)
-        if n:
-            write(p, new)
-            print(f"[codeplug.h] added encKeyIndex via /{pat[:40]}.../")
+
+# ---------------------------------------------------------------------------
+# 2. HR-C6000.c — encrypt/decrypt taps around audio-frame SPI calls
+# ---------------------------------------------------------------------------
+HRC_HEADER = """\
+#include "crypto/dmr_crypto.h"
+"""
+
+HRC_TX_LOCAL = """\
+\t\t\t\t\t\t/* AES patch: encrypt 27-byte AMBE voice payload before chip TX (local) */
+\t\t\t\t\t\tif (dmr_crypto_tx_active() && currentChannelData != NULL
+\t\t\t\t\t\t    && currentChannelData->chMode == RADIO_MODE_DIGITAL)
+\t\t\t\t\t\t{
+\t\t\t\t\t\t\tstatic uint32_t txSuperframeNumber = 0;
+\t\t\t\t\t\t\tdmr_crypto_tx_frame((uint8_t *)hrc.deferredUpdateBufferOutPtr,
+\t\t\t\t\t\t\t                    txSuperframeNumber++);
+\t\t\t\t\t\t}
+"""
+
+HRC_TX_HOTSPOT = """\
+\t\t\t\t\t\t/* AES patch: encrypt 27-byte AMBE voice payload before chip TX (hotspot) */
+\t\t\t\t\t\tif (dmr_crypto_tx_active() && currentChannelData != NULL
+\t\t\t\t\t\t    && currentChannelData->chMode == RADIO_MODE_DIGITAL)
+\t\t\t\t\t\t{
+\t\t\t\t\t\t\tstatic uint32_t txSuperframeNumberHS = 0;
+\t\t\t\t\t\t\tdmr_crypto_tx_frame((uint8_t *)(deferredUpdateBuffer + LC_DATA_LENGTH),
+\t\t\t\t\t\t\t                    txSuperframeNumberHS++);
+\t\t\t\t\t\t}
+"""
+
+HRC_RX = """\
+\t\t\t\t/* AES patch: decrypt 27-byte AMBE voice payload right after chip RX */
+\t\t\t\tif (dmr_crypto_rx_active() && currentChannelData != NULL
+\t\t\t\t    && currentChannelData->chMode == RADIO_MODE_DIGITAL)
+\t\t\t\t{
+\t\t\t\t\tstatic uint32_t rxSuperframeNumber = 0;
+\t\t\t\t\tdmr_crypto_rx_frame(DMR_frame_buffer + LC_DATA_LENGTH, rxSuperframeNumber++);
+\t\t\t\t}
+"""
+
+
+def mod_hrc6000() -> None:
+    p = SRC / "hardware" / "HR-C6000.c"
+    if not p.exists():
+        todo(f"HR-C6000.c not found at {p}")
+        return
+    src = read(p)
+    changed = False
+
+    # Add include after the last existing #include line near the top
+    if "#include \"crypto/dmr_crypto.h\"" not in src:
+        m = list(re.finditer(r'^#include\s+["<][^"\s>]+["<>]\s*$', src, re.M))
+        if not m:
+            todo("HR-C6000.c: no #include lines found near top")
+        else:
+            last = m[-1]
+            insert_at = last.end()
+            src = src[:insert_at] + "\n" + HRC_HEADER.rstrip() + src[insert_at:]
+            changed = True
+            print("  HR-C6000.c: added #include crypto/dmr_crypto.h")
+
+    # Tap 1: TX local — line containing the local-TX SPI write
+    tx_local_anchor = (
+        "SPI1WritePageRegByteArray(0x03, 0x00, "
+        "(uint8_t*)hrc.deferredUpdateBufferOutPtr, AMBE_AUDIO_LENGTH)"
+    )
+    if "/* AES patch: encrypt 27-byte AMBE voice payload before chip TX (local) */" not in src:
+        try:
+            src = insert_before_once(
+                src, tx_local_anchor, HRC_TX_LOCAL,
+                "/* AES patch: encrypt 27-byte AMBE voice payload before chip TX (local) */",
+            )
+            changed = True
+            print("  HR-C6000.c: TX local tap inserted")
+        except LookupError:
+            todo(f"HR-C6000.c: TX local SPI call not found - insert encrypt block before line containing: {tx_local_anchor}")
+
+    # Tap 2: TX hotspot
+    tx_hotspot_anchor = (
+        "SPI1WritePageRegByteArray(0x03, 0x00, "
+        "(uint8_t*)(deferredUpdateBuffer + LC_DATA_LENGTH), AMBE_AUDIO_LENGTH)"
+    )
+    if "/* AES patch: encrypt 27-byte AMBE voice payload before chip TX (hotspot) */" not in src:
+        try:
+            src = insert_before_once(
+                src, tx_hotspot_anchor, HRC_TX_HOTSPOT,
+                "/* AES patch: encrypt 27-byte AMBE voice payload before chip TX (hotspot) */",
+            )
+            changed = True
+            print("  HR-C6000.c: TX hotspot tap inserted")
+        except LookupError:
+            todo(f"HR-C6000.c: TX hotspot SPI call not found")
+
+    # Tap 3: RX
+    rx_anchor = (
+        "SPI1ReadPageRegByteArray(0x03, 0x00, "
+        "DMR_frame_buffer + LC_DATA_LENGTH, AMBE_AUDIO_LENGTH)"
+    )
+    if "/* AES patch: decrypt 27-byte AMBE voice payload right after chip RX */" not in src:
+        try:
+            src = insert_once(
+                src, rx_anchor, HRC_RX,
+                "/* AES patch: decrypt 27-byte AMBE voice payload right after chip RX */",
+            )
+            changed = True
+            print("  HR-C6000.c: RX tap inserted")
+        except LookupError:
+            todo(f"HR-C6000.c: RX SPI call not found")
+
+    if changed:
+        write(p, src)
+
+
+# ---------------------------------------------------------------------------
+# 3. menuSystem.h — add MENU_KEY_MANAGEMENT, MENU_KEY_ENTRY enum entries
+#                  and the two function prototypes
+# ---------------------------------------------------------------------------
+def mod_menuSystem_h() -> None:
+    p = INC / "user_interface" / "menuSystem.h"
+    if not p.exists():
+        todo(f"menuSystem.h not found at {p}")
+        return
+    src = read(p)
+    changed = False
+
+    # Add enum entries before NUM_MENU_ENTRIES
+    if "MENU_KEY_MANAGEMENT" not in src:
+        anchor = "NUM_MENU_ENTRIES"
+        try:
+            src = insert_before_once(
+                src, anchor,
+                "\tMENU_KEY_MANAGEMENT,\n\tMENU_KEY_ENTRY,\n",
+                "MENU_KEY_MANAGEMENT",
+            )
+            changed = True
+            print("  menuSystem.h: added MENU_KEY_MANAGEMENT and MENU_KEY_ENTRY")
+        except LookupError:
+            todo("menuSystem.h: could not find NUM_MENU_ENTRIES - add MENU_KEY_MANAGEMENT and MENU_KEY_ENTRY to MENU_SCREENS enum manually")
+
+    # Add prototypes
+    if "menuKeyManagement(" not in src:
+        # Anchor on a known existing prototype.  STM32 fork uses "event"
+        # for the parameter name, Kinetis fork uses "ev" — accept either.
+        for proto_anchor in (
+            "menuStatus_t menuChannelDetails(uiEvent_t *event, bool isFirstRun);",
+            "menuStatus_t menuChannelDetails(uiEvent_t *ev, bool isFirstRun);",
+        ):
+            if proto_anchor in src:
+                src = insert_once(
+                    src, proto_anchor,
+                    "menuStatus_t menuKeyManagement(uiEvent_t *event, bool isFirstRun);\n"
+                    "menuStatus_t menuKeyEntry(uiEvent_t *event, bool isFirstRun);\n",
+                    "menuKeyManagement(uiEvent_t",
+                )
+                changed = True
+                print("  menuSystem.h: added prototypes for menuKeyManagement and menuKeyEntry")
+                break
+        else:
+            todo("menuSystem.h: anchor menuChannelDetails prototype not found - add menuKeyManagement and menuKeyEntry prototypes manually")
+
+    if changed:
+        write(p, src)
+
+
+# ---------------------------------------------------------------------------
+# 4. menuSystem.c — add { menuKeyManagement, NULL, NULL, 0 } and
+#                  { menuKeyEntry, NULL, NULL, 0 } to menuFunctions[]
+#                  and { 2, MENU_KEY_MANAGEMENT } to mainMenuItems[]
+# ---------------------------------------------------------------------------
+def mod_menuSystem_c() -> None:
+    p = SRC / "user_interface" / "menuSystem.c"
+    if not p.exists():
+        todo(f"menuSystem.c not found at {p}")
+        return
+    src = read(p)
+    changed = False
+
+    # ---- 4a. menuFunctions[] — append two entries at the end ----
+    if "{ menuKeyManagement," not in src:
+        # Find the closing brace of menuFunctions[] array.
+        m = re.search(
+            r"static\s+menuFunctionData_t\s+menuFunctions\s*\[\s*\]\s*=\s*\{",
+            src,
+        )
+        if not m:
+            todo("menuSystem.c: could not locate menuFunctions[] array")
+        else:
+            # Walk forward to find the matching closing brace.
+            depth = 1
+            i = m.end()
+            while i < len(src) and depth > 0:
+                if src[i] == "{":
+                    depth += 1
+                elif src[i] == "}":
+                    depth -= 1
+                    if depth == 0:
+                        break
+                i += 1
+            if depth != 0:
+                todo("menuSystem.c: brace match failed in menuFunctions[]")
+            else:
+                # Look back to before the closing brace and insert before it.
+                # Find the last existing entry's line — preserve trailing comma.
+                close = i
+                # Find start of line containing the close brace
+                line_start = src.rfind("\n", 0, close) + 1
+                payload = (
+                    "\t\t{ menuKeyManagement,      NULL, NULL, 0 },\n"
+                    "\t\t{ menuKeyEntry,           NULL, NULL, 0 },\n"
+                )
+                src = src[:line_start] + payload + src[line_start:]
+                changed = True
+                print("  menuSystem.c: appended menuKeyManagement and menuKeyEntry to menuFunctions[]")
+
+    # ---- 4b. mainMenuItems[] — insert before its closing brace ----
+    if "MENU_KEY_MANAGEMENT" not in src:
+        m = re.search(
+            r"const\s+menuItemNewData_t\s+mainMenuItems\s*\[\s*\]\s*=\s*\{",
+            src,
+        )
+        if not m:
+            todo("menuSystem.c: could not locate mainMenuItems[] array")
+        else:
+            depth = 1
+            i = m.end()
+            while i < len(src) and depth > 0:
+                if src[i] == "{":
+                    depth += 1
+                elif src[i] == "}":
+                    depth -= 1
+                    if depth == 0:
+                        break
+                i += 1
+            if depth != 0:
+                todo("menuSystem.c: brace match failed in mainMenuItems[]")
+            else:
+                close = i
+                line_start = src.rfind("\n", 0, close) + 1
+                payload = (
+                    "\t{   2, MENU_KEY_MANAGEMENT  }, /* AES patch: shows \"Credits\" placeholder */\n"
+                )
+                src = src[:line_start] + payload + src[line_start:]
+                changed = True
+                print("  menuSystem.c: appended MENU_KEY_MANAGEMENT to mainMenuItems[]")
+
+    if changed:
+        write(p, src)
+
+
+# ---------------------------------------------------------------------------
+# 5. menuChannelDetails.c — Block C (enum), D (render), E (LEFT/RIGHT)
+# ---------------------------------------------------------------------------
+def mod_menuChannelDetails() -> None:
+    p = SRC / "user_interface" / "menuChannelDetails.c"
+    if not p.exists():
+        todo(f"menuChannelDetails.c not found at {p}")
+        return
+    src = read(p)
+    changed = False
+
+    # ---- 5a. Add include for crypto/key_storage.h ----
+    if "#include \"crypto/key_storage.h\"" not in src:
+        m = list(re.finditer(r'^#include\s+["<][^"\s>]+["<>]\s*$', src, re.M))
+        if m:
+            last = m[-1]
+            src = src[:last.end()] + "\n#include \"crypto/key_storage.h\"" + src[last.end():]
+            changed = True
+            print("  menuChannelDetails.c: added #include crypto/key_storage.h")
+
+    # ---- 5b. Block C — add CH_DETAILS_ENC_KEY before NUM_CH_DETAILS_ITEMS ----
+    if "CH_DETAILS_ENC_KEY" not in src:
+        anchor = "NUM_CH_DETAILS_ITEMS"
+        try:
+            src = insert_before_once(
+                src, anchor,
+                "\tCH_DETAILS_ENC_KEY,\n",
+                "CH_DETAILS_ENC_KEY",
+            )
+            changed = True
+            print("  menuChannelDetails.c: added CH_DETAILS_ENC_KEY enum entry")
+        except LookupError:
+            todo("menuChannelDetails.c: could not find NUM_CH_DETAILS_ITEMS - add CH_DETAILS_ENC_KEY before it manually")
+
+    # ---- 5c. Block D — render case in updateScreen()'s switch ----
+    if "/* AES patch: CH_DETAILS_ENC_KEY render */" not in src:
+        # Locate updateScreen() definition (not its forward declaration).
+        # The function body begins at the first `{` after a line like:
+        #   `static void updateScreen(bool isFirstRun, bool allowedToSpeakUpdate)`
+        # (no trailing semicolon).
+        m = re.search(
+            r"static\s+void\s+updateScreen\s*\([^)]*\)\s*\{",
+            src,
+        )
+        if not m:
+            todo("menuChannelDetails.c: updateScreen() function not found")
+        else:
+            # Brace-match to find end of updateScreen.
+            depth = 1
+            i = m.end()
+            while i < len(src) and depth > 0:
+                if src[i] == "{":
+                    depth += 1
+                elif src[i] == "}":
+                    depth -= 1
+                    if depth == 0:
+                        break
+                i += 1
+            if depth != 0:
+                todo("menuChannelDetails.c: brace match failed in updateScreen()")
+            else:
+                fn_body_start = m.end()
+                fn_body_end = i
+                # The render switch in updateScreen() uses `switch(mNum)`
+                # (where mNum = current visible-item offset). Some forks
+                # use `switch (menuDataGlobal.currentItemIndex)` instead.
+                # Find the LARGEST switch in this function — that's the
+                # render switch with all CH_DETAILS_* cases.
+                fn_body = src[fn_body_start:fn_body_end]
+                candidates = []
+                for sw in re.finditer(
+                    r"switch\s*\(\s*(?:mNum|menuDataGlobal\.currentItemIndex)\s*\)\s*\{",
+                    fn_body,
+                ):
+                    sw_open_end_abs = fn_body_start + sw.end()
+                    depth2 = 1
+                    j = sw_open_end_abs
+                    while j < len(src) and depth2 > 0:
+                        if src[j] == "{":
+                            depth2 += 1
+                        elif src[j] == "}":
+                            depth2 -= 1
+                            if depth2 == 0:
+                                break
+                        j += 1
+                    if depth2 == 0:
+                        candidates.append((sw, sw_open_end_abs, j, j - sw_open_end_abs))
+                if not candidates:
+                    todo("menuChannelDetails.c: render switch not found in updateScreen()")
+                else:
+                    # Pick the largest — that's the actual render switch.
+                    candidates.sort(key=lambda t: -t[3])
+                    sw, sw_open_end_abs, close_idx, _size = candidates[0]
+                    line_start = src.rfind("\n", 0, close_idx) + 1
+                    indent_match = re.match(r"[\t ]*", src[line_start:close_idx])
+                    indent = indent_match.group(0) if indent_match else "\t\t"
+                    payload = (
+                        f"{indent}case CH_DETAILS_ENC_KEY:\n"
+                        f"{indent}\t/* AES patch: CH_DETAILS_ENC_KEY render */\n"
+                        f"{indent}\t{{\n"
+                        f"{indent}\t\tstatic const char encKeyLabel[] = \"Enc Key\";\n"
+                        f"{indent}\t\tleftSide = encKeyLabel;\n"
+                        f"{indent}\t\tif (tmpChannel.chMode != RADIO_MODE_DIGITAL)\n"
+                        f"{indent}\t\t{{\n"
+                        f"{indent}\t\t\trightSideConst = currentLanguage->n_a;\n"
+                        f"{indent}\t\t}}\n"
+                        f"{indent}\t\telse if (tmpChannel.encKeyIndex == 0)\n"
+                        f"{indent}\t\t{{\n"
+                        f"{indent}\t\t\tstrcpy(rightSideVar, \"Off\");\n"
+                        f"{indent}\t\t}}\n"
+                        f"{indent}\t\telse\n"
+                        f"{indent}\t\t{{\n"
+                        f"{indent}\t\t\tconst KeySlot_t *ks = keystore_get(tmpChannel.encKeyIndex);\n"
+                        f"{indent}\t\t\tif (ks && (ks->flags & KEY_FLAG_SET) && ks->label[0])\n"
+                        f"{indent}\t\t\t{{\n"
+                        f"{indent}\t\t\t\tint n = (KEY_LABEL_LEN < (int)sizeof(rightSideVar) - 1)\n"
+                        f"{indent}\t\t\t\t        ? KEY_LABEL_LEN : (int)sizeof(rightSideVar) - 1;\n"
+                        f"{indent}\t\t\t\tmemcpy(rightSideVar, ks->label, (size_t)n);\n"
+                        f"{indent}\t\t\t\trightSideVar[n] = 0;\n"
+                        f"{indent}\t\t\t}}\n"
+                        f"{indent}\t\t\telse\n"
+                        f"{indent}\t\t\t{{\n"
+                        f"{indent}\t\t\t\tsnprintf(rightSideVar, sizeof(rightSideVar), \"Slot %u\",\n"
+                        f"{indent}\t\t\t\t         (unsigned)tmpChannel.encKeyIndex);\n"
+                        f"{indent}\t\t\t}}\n"
+                        f"{indent}\t\t}}\n"
+                        f"{indent}\t}}\n"
+                        f"{indent}\tbreak;\n"
+                    )
+                    src = src[:line_start] + payload + src[line_start:]
+                    changed = True
+                    print("  menuChannelDetails.c: added Block D (render case)")
+
+    # ---- 5d. Block E — LEFT and RIGHT handler cases ----
+    # Anchor on the unique `handlesLeftKey:` / `handlesRightKey:` goto
+    # labels. The switch on currentItemIndex is the next switch after
+    # each label. Earlier KEY_LEFT/RIGHT references (e.g. the freq-entry
+    # backspace handler) don't have these labels, so this disambiguates.
+    def patch_handler_switch(src_text: str, label: str, sentinel: str,
+                             body_for: Callable[[str], str]) -> tuple[str, bool]:
+        if sentinel in src_text:
+            return src_text, False
+        # Find the label declaration (not the goto reference). Use the
+        # specific pattern `\n<whitespace>label:\n` to skip the gotos.
+        m = re.search(rf"\n[\t ]+{label}:\s*\n", src_text)
+        if not m:
+            return src_text, False
+        # Find next switch after the label
+        sw = re.search(
+            r"switch\s*\(\s*menuDataGlobal\.currentItemIndex\s*\)\s*\{",
+            src_text[m.end():],
+        )
+        if not sw:
+            return src_text, False
+        sw_open_end = m.end() + sw.end()
+        # Brace-match to find the closing brace of the switch
+        depth = 1
+        i = sw_open_end
+        while i < len(src_text) and depth > 0:
+            if src_text[i] == "{":
+                depth += 1
+            elif src_text[i] == "}":
+                depth -= 1
+                if depth == 0:
+                    break
+            i += 1
+        if depth != 0:
+            return src_text, False
+        close_idx = i
+        line_start = src_text.rfind("\n", 0, close_idx) + 1
+        indent_match = re.match(r"[\t ]*", src_text[line_start:close_idx])
+        indent = indent_match.group(0) if indent_match else "\t\t\t"
+        return (
+            src_text[:line_start] + body_for(indent) + src_text[line_start:],
+            True,
+        )
+
+    def left_body(indent: str) -> str:
+        return (
+            f"{indent}case CH_DETAILS_ENC_KEY:\n"
+            f"{indent}\t/* AES patch: CH_DETAILS_ENC_KEY LEFT */\n"
+            f"{indent}\tif (tmpChannel.encKeyIndex > 0) tmpChannel.encKeyIndex--;\n"
+            f"{indent}\tbreak;\n"
+        )
+
+    def right_body(indent: str) -> str:
+        return (
+            f"{indent}case CH_DETAILS_ENC_KEY:\n"
+            f"{indent}\t/* AES patch: CH_DETAILS_ENC_KEY RIGHT */\n"
+            f"{indent}\tif (tmpChannel.encKeyIndex < KEY_SLOT_COUNT) tmpChannel.encKeyIndex++;\n"
+            f"{indent}\tbreak;\n"
+        )
+
+    src, ok_left = patch_handler_switch(
+        src, "handlesLeftKey",
+        "/* AES patch: CH_DETAILS_ENC_KEY LEFT */",
+        left_body,
+    )
+    src, ok_right = patch_handler_switch(
+        src, "handlesRightKey",
+        "/* AES patch: CH_DETAILS_ENC_KEY RIGHT */",
+        right_body,
+    )
+    if ok_left:
+        changed = True
+        print("  menuChannelDetails.c: added Block E (LEFT handler case)")
+    elif "/* AES patch: CH_DETAILS_ENC_KEY LEFT */" not in src:
+        todo("menuChannelDetails.c: KEY_LEFT handler switch not found - add CH_DETAILS_ENC_KEY case manually")
+
+    if ok_right:
+        changed = True
+        print("  menuChannelDetails.c: added Block E (RIGHT handler case)")
+    elif "/* AES patch: CH_DETAILS_ENC_KEY RIGHT */" not in src:
+        todo("menuChannelDetails.c: KEY_RIGHT handler switch not found - add CH_DETAILS_ENC_KEY case manually")
+
+    if changed:
+        write(p, src)
+
+
+# ---------------------------------------------------------------------------
+# 6. uiUtilities.c — call enc_indicator_render() from main-screen header
+# ---------------------------------------------------------------------------
+def mod_uiUtilities() -> None:
+    p = SRC / "user_interface" / "uiUtilities.c"
+    if not p.exists():
+        todo(f"uiUtilities.c not found at {p} - call enc_indicator_render() from main screen render path manually")
+        return
+    src = read(p)
+    if "enc_indicator_render" in src:
+        return
+    if "#include \"crypto/enc_indicator.h\"" not in src:
+        m = list(re.finditer(r'^#include\s+["<][^"\s>]+["<>]\s*$', src, re.M))
+        if not m:
+            todo("uiUtilities.c: no #include lines found")
             return
-
-    # Strategy B: locate struct_codeplugChannel_t and insert encKeyIndex
-    # right before its closing brace. This grows the struct by 1 byte —
-    # acceptable when there's no explicit pad to steal from.
-    m = re.search(r'\bstruct\s+\{([^{}]*?)\}\s*__attribute__\s*\(\s*\(\s*packed\s*\)\s*\)\s*struct_codeplugChannel_t',
-                  src, re.MULTILINE | re.DOTALL)
-    if not m:
-        m = re.search(r'\btypedef\s+struct\s*\{([^{}]*?)\}\s*__attribute__\s*\(\s*\(\s*packed\s*\)\s*\)\s*struct_codeplugChannel_t',
-                      src, re.MULTILINE | re.DOTALL)
-    if m:
-        body_start = m.start(1)
-        body_end   = m.end(1)
-        new_field  = "\n\tuint8_t encKeyIndex;  /* AES patch: 0=off, 1..16 = key slot */\n"
-        write(p, src[:body_end] + new_field + src[body_end:])
-        print(f"[codeplug.h] appended encKeyIndex at end of struct body (struct grew by 1 byte)")
-        with open(os.path.join(root, 'AES_PATCH_TODO.md'), 'a') as f:
-            f.write(textwrap.dedent("""
-            ## codeplug.h — note about struct size change
-            No explicit pad/reserved field was found, so `encKeyIndex` was appended
-            at the end of `struct_codeplugChannel_t`. The packed struct is now 1
-            byte larger. If the firmware reads a fixed channel record length from
-            EEPROM, search the codebase for `sizeof(struct_codeplugChannel_t)` or
-            a hard-coded channel length constant (often 56 for OpenGD77) and bump
-            it by 1. Otherwise existing codeplugs may misalign on first read.
-            """))
-        return
-
-    raise ModFailed(textwrap.dedent("""\
-        codeplug.h: could not locate a pad/reserved field or the struct itself.
-        Manual fix: in struct_codeplugChannel_t, reduce one reserved array by 1
-        and add:
-            uint8_t encKeyIndex;   /* 0=off, 1..16 = key slot */
-    """))
-
-def mod_hrc6000_includes(root):
-    p = find(root, 'HR-C6000.c')
-    if not p:
-        raise ModFailed("HR-C6000.c not found")
-    src = read(p)
-    if 'crypto/dmr_crypto.h' in src:
-        print("[HR-C6000.c includes] already applied"); return
-
-    # open-ham/OpenGD77 uses #include "hardware/HR-C6000.h"
-    # Other forks may use "functions/HR-C6000.h" or just "HR-C6000.h"
-    anchors = [
-        r'^#include\s+"hardware/HR-C6000\.h"\s*$',
-        r'^#include\s+"functions/HR-C6000\.h"\s*$',
-        r'^#include\s+"HR-C6000\.h"\s*$',
-        r'^#include\s+"functions/settings\.h"\s*$',   # near top of HR-C6000.c
+        last = m[-1]
+        src = src[:last.end()] + "\n#include \"crypto/enc_indicator.h\"" + src[last.end():]
+    # Best-effort placement: append to a function called something like
+    # uiUtilityRenderHeader or similar.  If we can't find one, leave a TODO.
+    candidates = [
+        "uiUtilityRenderHeader",
+        "uiUtilityDrawRSSIBarGraph",
     ]
-    for a in anchors:
-        try:
-            insert_after(p, a,
-                '#include "crypto/dmr_crypto.h"\n#include "crypto/key_storage.h"',
-                f'HR-C6000.c includes @ /{a[:40]}/')
-            return
-        except ModFailed:
+    inserted = False
+    for fn in candidates:
+        m = re.search(rf"\b{fn}\b\s*\([^)]*\)\s*\{{", src)
+        if not m:
             continue
-    raise ModFailed("HR-C6000.c: no suitable include anchor found")
+        # Find function's closing brace.
+        depth = 1
+        i = m.end()
+        while i < len(src) and depth > 0:
+            if src[i] == "{":
+                depth += 1
+            elif src[i] == "}":
+                depth -= 1
+                if depth == 0:
+                    break
+            i += 1
+        if depth != 0:
+            continue
+        line_start = src.rfind("\n", 0, i) + 1
+        src = src[:line_start] + "\tenc_indicator_render();\n" + src[line_start:]
+        write(p, src)
+        print(f"  uiUtilities.c: enc_indicator_render() added to {fn}()")
+        inserted = True
+        break
+    if not inserted:
+        write(p, src)
+        todo("uiUtilities.c: place a call to enc_indicator_render() in the function that draws the main-screen header (typically uiUtilityRenderHeader)")
 
-def mod_hrc6000_taps(root):
-    """
-    The actual encrypt/decrypt insertion needs to happen at the AMBE+2 buffer
-    boundary. The exact function name varies across OpenGD77 forks. We try
-    several known candidates; if none match, we leave a TODO file for the user.
-    """
-    p = find(root, 'HR-C6000.c')
-    src = read(p)
-    if 'dmr_crypto_tx_frame' in src:
-        print("[HR-C6000.c] taps already present"); return
 
-    # TX tap candidates — open-ham fork: voice frames are pushed via
-    # SPI0WritePageRegByte / SPI0WritePageRegByteArray to chip register 0x03
-    # inside tick_HR_C6000 / handle_TX_audio paths. We try the tightest
-    # patterns first, fall back to broader ones.
-    tx_anchor_candidates = [
-        r'SPI0WritePageRegByteArray\s*\(\s*0x03\b',          # direct write to TX audio reg
-        r'/\*\s*Send.*AMBE.*?\*/',
-        r'\bhandle_tx_audio\b',
-        r'\btick_TXBuffer\b',
-        r'\bhrc6000HandleVoiceFrame\b',
-        r'wavbufferReadIdx',
+# ---------------------------------------------------------------------------
+# 8. codec_interface.c + codec.h — replace `BL <literal>` with `LDR/BLX <reg>`
+#    so newer GCC/binutils (14.x+) can link the absolute calls into the
+#    AMBE codec. Independent of the AES patch itself, but required to
+#    build at all on STM32CubeIDE 2.1+.
+# ---------------------------------------------------------------------------
+def mod_codec_blx_fix() -> None:
+    # 8a. codec.h — OR bit 0 into the address macros, drop trailing semicolons.
+    h = INC / "dmr_codec" / "codec.h"
+    if h.exists():
+        src = read(h)
+        if "/* AES patch: BLX fix */" not in src:
+            patched = src
+            # Match either `#define NAME 0xADDR;` or `#define NAME 0xADDR`
+            for sym, orig_lsb_clear, orig_lsb_set in [
+                ("AMBE_DECODE",     "0x08075954", "0x08075955"),
+                ("AMBE_ENCODE",     "0x080754ac", "0x080754ad"),
+                ("AMBE_ENCODE_ECC", "0x08075864", "0x08075865"),
+            ]:
+                # Tolerate trailing semicolon and surrounding spaces.
+                pat = re.compile(
+                    rf"(#define\s+{sym}\s+){re.escape(orig_lsb_clear)};?",
+                )
+                patched = pat.sub(rf"\g<1>{orig_lsb_set}    /* AES patch: BLX fix */", patched)
+            if patched != src:
+                write(h, patched)
+                print("  codec.h: AMBE_DECODE/ENCODE/ENCODE_ECC addresses patched (Thumb bit set, trailing ; removed)")
+            else:
+                # Maybe the address was already patched in some other variant
+                print("  codec.h: no matching addresses to patch (already fixed?)")
+
+    # 8b. codec_interface.c — replace BL <literal> with LDR R12, =<literal>; BLX R12.
+    c = SRC / "dmr_codec" / "codec_interface.c"
+    if not c.exists():
+        return
+    src = read(c)
+    if "/* AES patch: BLX fix */" in src:
+        return
+    # Replace every `"BL " QU(NAME)` with the LDR/BLX form.
+    # Be tolerant of `\n\t\t\t\"BL \" QU(...)` indentation — only the
+    # `"BL " QU(...)` substring matters for the regex.
+    pattern = re.compile(r'"BL "\s+QU\((AMBE_(?:DECODE|ENCODE|ENCODE_ECC))\)')
+    count = 0
+    def repl(m):
+        nonlocal count
+        count += 1
+        sym = m.group(1)
+        return (f'"LDR R12, =" QU({sym}) "\\n"\n\t\t\t"BLX R12\\n"   /* AES patch: BLX fix */')
+    new_src = pattern.sub(repl, src)
+    if count == 0:
+        print("  codec_interface.c: no BL <literal> calls found — already patched?")
+        return
+    write(c, new_src)
+    print(f"  codec_interface.c: replaced {count} BL <literal> call(s) with LDR/BLX")
+def verify_new_files() -> None:
+    expected = [
+        SRC / "crypto" / "aes.c",
+        SRC / "crypto" / "sha256.c",
+        SRC / "crypto" / "kdf.c",
+        SRC / "crypto" / "dmr_crypto.c",
+        SRC / "crypto" / "key_storage.c",
+        SRC / "crypto" / "enc_indicator.c",
+        SRC / "user_interface" / "menuKeyManagement.c",
+        SRC / "user_interface" / "menuKeyEntry.c",
+        INC / "crypto" / "aes.h",
+        INC / "crypto" / "sha256.h",
+        INC / "crypto" / "kdf.h",
+        INC / "crypto" / "dmr_crypto.h",
+        INC / "crypto" / "key_storage.h",
+        INC / "crypto" / "enc_indicator.h",
     ]
-    rx_anchor_candidates = [
-        r'SPI0ReadPageRegByteArray\s*\(\s*0x82\b',           # direct read from RX audio reg
-        r'/\*\s*Receive.*AMBE.*?\*/',
-        r'\bhandle_rx_audio\b',
-        r'\btick_RXBuffer\b',
-        r'\bcc_RXFrameAndCheck\b',
-        r'wavbufferWriteIdx',
-    ]
+    for f in expected:
+        if not f.exists():
+            todo(f"missing {f.relative_to(REPO)} — copy from new_files/ via setup.ps1")
 
-    placed_tx = placed_rx = False
-    for a in tx_anchor_candidates:
-        try:
-            insert_after(p, a,
-                "\t/* AES-256-CTR: encrypt the 27-byte AMBE+2 superframe buffer just\n"
-                "\t * before it goes to the HR-C6000 SPI registers. The buffer\n"
-                "\t * variable name in your tree may differ — adjust the symbol below. */\n"
-                "\tif (dmr_crypto_tx_active() && currentChannelData != NULL\n"
-                "\t    && (currentChannelData->chMode == RADIO_MODE_DIGITAL)) {\n"
-                "\t    extern uint8_t  audioAndHotspotDataBuffer[];\n"
-                "\t    extern uint32_t txSuperframeNumber;\n"
-                "\t    dmr_crypto_tx_frame(audioAndHotspotDataBuffer, txSuperframeNumber++);\n"
-                "\t}",
-                f'HR-C6000.c TX tap @{a[:25]}')
-            placed_tx = True
-            break
-        except ModFailed:
-            continue
 
-    for a in rx_anchor_candidates:
-        try:
-            insert_after(p, a,
-                "\t/* AES-256-CTR: decrypt the 27-byte AMBE+2 superframe buffer as soon\n"
-                "\t * as it arrives from the HR-C6000 SPI registers. Adjust symbols if\n"
-                "\t * the buffer/var names differ in your tree. */\n"
-                "\tif (dmr_crypto_rx_active() && currentChannelData != NULL\n"
-                "\t    && (currentChannelData->chMode == RADIO_MODE_DIGITAL)) {\n"
-                "\t    extern uint8_t  audioAndHotspotDataBuffer[];\n"
-                "\t    extern uint32_t rxSuperframeNumber;\n"
-                "\t    dmr_crypto_rx_frame(audioAndHotspotDataBuffer, rxSuperframeNumber++);\n"
-                "\t}",
-                f'HR-C6000.c RX tap @{a[:25]}')
-            placed_rx = True
-            break
-        except ModFailed:
-            continue
+def main() -> int:
+    global REPO, APP, SRC, INC, TODO_PATH
+    if len(sys.argv) != 2:
+        print("Usage: apply_mods.py <repo_root>", file=sys.stderr)
+        return 2
+    REPO = Path(sys.argv[1]).resolve()
+    APP = REPO / "MDUV380_firmware" / "application"
+    SRC = APP / "source"
+    INC = APP / "include"
+    TODO_PATH = REPO / "AES_PATCH_TODO.md"
 
-    if not (placed_tx and placed_rx):
-        todo = os.path.join(root, 'AES_PATCH_TODO.md')
-        with open(todo, 'a') as f:
-            f.write(textwrap.dedent("""
-            ## HR-C6000.c manual taps required
-            Could not auto-locate the AMBE+2 SPI transfer site. In `HR-C6000.c`:
+    if not APP.exists():
+        print(f"ERROR: not an OpenMDUV380 source tree (no MDUV380_firmware/application at {REPO})",
+              file=sys.stderr)
+        return 1
 
-            **TX:** find the function that writes the 27-byte audio payload to the
-            HR-C6000 SPI registers (region around chip register 0x03/0x04).
-            Insert *immediately before the SPI write*:
+    print("Applying AES-256 patch to STM32 OpenMDUV380 source tree...")
+    print(f"  Repo: {REPO}")
+    print(f"  App:  {APP}")
+    print()
 
-                if (dmr_crypto_tx_active() && currentChannelData != NULL
-                    && currentChannelData->chMode == RADIO_MODE_DIGITAL) {
-                    dmr_crypto_tx_frame(<your-buf-var>, txSuperframeNumber++);
-                }
+    verify_new_files()
+    mod_codeplug()
+    mod_hrc6000()
+    mod_menuSystem_h()
+    mod_menuSystem_c()
+    mod_menuChannelDetails()
+    mod_uiUtilities()
+    mod_codec_blx_fix()
 
-            **RX:** find the matching read from chip register 0x82.
-            Insert *immediately after the SPI read*:
+    write_todo()
+    if todo_lines:
+        print()
+        print(f"  {len(todo_lines)} item(s) require manual edits — see {TODO_PATH.relative_to(REPO)}")
+    else:
+        print()
+        print("  All automated edits applied successfully.")
+    return 0
 
-                if (dmr_crypto_rx_active() && currentChannelData != NULL
-                    && currentChannelData->chMode == RADIO_MODE_DIGITAL) {
-                    dmr_crypto_rx_frame(<your-buf-var>, rxSuperframeNumber++);
-                }
 
-            Declare somewhere accessible:
-
-                uint32_t txSuperframeNumber, rxSuperframeNumber;
-            """))
-        print("[HR-C6000.c] auto-tap failed — see AES_PATCH_TODO.md")
-
-def mod_channel_details(root):
-    p = find(root, 'menuChannelDetails.c')
-    if not p:
-        print("[menuChannelDetails.c] not found, skipping (insert manually)"); return
-    insert_after(p,
-        r'^#include\s+"user_interface/menuSystem\.h"',
-        '#include "crypto/key_storage.h"',
-        'menuChannelDetails.c include')
-    # Insertion of the new menu line is highly tree-specific; emit TODO instead.
-    with open(os.path.join(root, 'AES_PATCH_TODO.md'), 'a') as f:
-        f.write(textwrap.dedent("""
-        ## menuChannelDetails.c — add Encryption Key selector
-        Add a row in the channel-details menu enum/array that lets the user
-        pick `currentChannelData->encKeyIndex` in 0..16. The field is already
-        in the codeplug struct via the codeplug.h patch.
-        On render, look up `keystore_get(idx)` to show the slot label.
-        """))
-
-def mod_main_menu(root):
-    p = find(root, 'menuMainMenu.c')
-    if not p:
-        with open(os.path.join(root, 'AES_PATCH_TODO.md'), 'a') as f:
-            f.write("\n## menuMainMenu.c not found — register MENU_KEY_MANAGEMENT manually.\n")
-        return
-    src = read(p)
-    if 'menuKeyManagement' in src:
-        print("[menuMainMenu.c] already applied"); return
-    # Append a TODO marker — splicing into an enum table is fork-specific.
-    with open(os.path.join(root, 'AES_PATCH_TODO.md'), 'a') as f:
-        f.write(textwrap.dedent("""
-        ## menuMainMenu.c — add 'Encryption Keys' top-level entry
-        In the main menu items array, add an entry that calls `menuKeyManagement`.
-        Also add `extern menuStatus_t menuKeyManagement(uiEvent_t*, bool);`
-        to `menuSystem.h` and a MENU_KEY_MANAGEMENT enum slot.
-        """))
-
-def mod_enc_indicator(root):
-    """
-    Inject a call to enc_indicator_draw() into the header rendering function
-    on open-ham/OpenGD77. The header is drawn by uiUtilityRenderHeader(),
-    typically in user_interface/uiUtilities.c. We insert the call at the very
-    end of the function so the badge draws on top of any existing icons.
-    """
-    p = find(root, 'uiUtilities.c')
-    if not p:
-        with open(os.path.join(root, 'AES_PATCH_TODO.md'), 'a') as f:
-            f.write(textwrap.dedent("""
-            ## ENC indicator — uiUtilities.c not found
-            Add `#include "crypto/enc_indicator.h"` near the other includes,
-            and call `enc_indicator_draw();` at the end of the header
-            rendering function (`uiUtilityRenderHeader` in open-ham).
-            """))
-        return
-
-    src = read(p)
-    if 'enc_indicator_draw' in src:
-        print("[uiUtilities.c] ENC indicator already wired"); return
-
-    # 1) Add include
-    try:
-        insert_after(p,
-            r'^#include\s+"user_interface/menuSystem\.h"',
-            '#include "crypto/enc_indicator.h"',
-            'uiUtilities.c include')
-    except ModFailed:
-        # Fall back to inserting after any user_interface/* include
-        try:
-            insert_after(p,
-                r'^#include\s+"user_interface/[^"]+\.h"',
-                '#include "crypto/enc_indicator.h"',
-                'uiUtilities.c include (fallback)')
-        except ModFailed:
-            pass
-
-    # 2) Insert the draw call near the end of uiUtilityRenderHeader
-    src = read(p)
-    m = re.search(r'\bvoid\s+uiUtilityRenderHeader\s*\([^)]*\)\s*\{',
-                  src, re.MULTILINE)
-    if not m:
-        with open(os.path.join(root, 'AES_PATCH_TODO.md'), 'a') as f:
-            f.write(textwrap.dedent("""
-            ## ENC indicator — function not found
-            Locate the header-render function (likely `uiUtilityRenderHeader`)
-            and add `enc_indicator_draw();` just before it returns.
-            """))
-        return
-
-    # Find the closing brace at the same depth as the opening
-    depth = 1
-    i = m.end()
-    while i < len(src) and depth > 0:
-        if src[i] == '{': depth += 1
-        elif src[i] == '}': depth -= 1
-        i += 1
-    if depth != 0:
-        return
-    insert_point = i - 1   # just before the closing brace
-    payload = "\n\t/* AES patch: render ENC badge if encryption is configured */\n\tenc_indicator_draw();\n"
-    if payload.strip() in src:
-        print("[uiUtilities.c] ENC draw call already present"); return
-    write(p, src[:insert_point] + payload + src[insert_point:])
-    print(f"[uiUtilities.c] inserted enc_indicator_draw() call")
-
-def mod_aes_header(root):
-    """Configure the freshly-fetched tiny-AES-c aes.h for AES256 + CTR."""
-    p = find(root, 'aes.h')
-    if not p:
-        raise ModFailed("aes.h not found (was tiny-AES-c fetched?)")
-    s = read(p)
-    for sym, val in (('AES128',0),('AES192',0),('AES256',1),
-                     ('CBC',0),('CTR',1),('ECB',0)):
-        s = re.sub(rf'^(#define\s+{sym}\s+)\d+',
-                   rf'\g<1>{val}', s, flags=re.M)
-        if not re.search(rf'^#define\s+{sym}\b', s, flags=re.M):
-            s = s.replace('#ifndef _AES_H_',
-                          f'#ifndef _AES_H_\n#define {sym} {val}', 1)
-    write(p, s)
-    print(f"[aes.h] configured: AES256=1, CTR=1")
-
-def mod_build(root):
-    """
-    OpenGD77 builds with MCUXpresso (Eclipse). New files in firmware/source/crypto/
-    are picked up by the IDE on Project > Refresh, but headless `make` builds
-    need adding to .cproject or to a Makefile if present. Best-effort:
-    """
-    cproj = find(root, '.cproject')
-    if cproj:
-        with open(os.path.join(root, 'AES_PATCH_TODO.md'), 'a') as f:
-            f.write(textwrap.dedent("""
-            ## Build system
-            - In MCUXpresso: right-click the project, **Refresh**, then
-              **Project > Clean** to rebuild.
-            - The `firmware/source/crypto/` folder needs to be in the project's
-              "Paths and Symbols > Source Location". MCUXpresso usually picks
-              this up automatically; verify under Project Properties.
-            - Include path: add `firmware/source` so `#include "crypto/aes.h"` resolves.
-            """))
-    mk = find(root, 'Makefile')
-    if mk:
-        # If a top-level Makefile exists, emit a hint
-        with open(os.path.join(root, 'AES_PATCH_TODO.md'), 'a') as f:
-            f.write(f"\n## Makefile detected at {mk} — add crypto/*.c to SRCS list.\n")
-
-# ----------------------------------------------------------------------------
-def main():
-    ap = argparse.ArgumentParser()
-    ap.add_argument('--root', required=True, help='OpenGD77 source root')
-    args = ap.parse_args()
-
-    if not os.path.isdir(args.root):
-        sys.exit(f"not a directory: {args.root}")
-
-    # Empty TODO file at start
-    todo = os.path.join(args.root, 'AES_PATCH_TODO.md')
-    open(todo, 'w').write("# AES-256 patch — manual fixup required\n")
-
-    fail = 0
-    for fn in (mod_aes_header, mod_codeplug, mod_hrc6000_includes, mod_hrc6000_taps,
-               mod_channel_details, mod_main_menu, mod_enc_indicator, mod_build):
-        try: fn(args.root)
-        except ModFailed as e:
-            print("FAIL:", e); fail += 1
-
-    print(f"\nDone. {fail} modifications failed; review AES_PATCH_TODO.md.")
-
-if __name__ == '__main__':
-    main()
+if __name__ == "__main__":
+    sys.exit(main())

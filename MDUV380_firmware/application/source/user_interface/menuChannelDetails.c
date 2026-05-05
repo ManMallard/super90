@@ -34,6 +34,7 @@
 #include "user_interface/uiLocalisation.h"
 #include "interfaces/gps.h"
 
+#include "crypto/key_storage.h"
 #if defined(CPU_MK22FN512VLL12)
 // On MK22, isnan macro has a bug, circumvent it
 #undef isnan
@@ -113,6 +114,7 @@ enum
 	CH_DETAILS_TA_TX_TS2,
 	CH_DETAILS_APRS_CONFIG,
 	CH_DETAILS_DMR_FORCE_DMO,
+	CH_DETAILS_ENC_KEY,
 	NUM_CH_DETAILS_ITEMS
 };// The last item in the list is used so that we automatically get a total number of items in the list
 
@@ -688,6 +690,37 @@ static void updateScreen(bool isFirstRun, bool allowedToSpeakUpdate)
 							rightSideConst = ((codeplugChannelGetFlag(&tmpChannel, CHANNEL_FLAG_FORCE_DMO) != 0) ? currentLanguage->yes : currentLanguage->no);
 						}
 						break;
+				case CH_DETAILS_ENC_KEY:
+					/* AES patch: CH_DETAILS_ENC_KEY render */
+					{
+						static const char encKeyLabel[] = "Enc Key";
+						leftSide = encKeyLabel;
+						if (tmpChannel.chMode != RADIO_MODE_DIGITAL)
+						{
+							rightSideConst = currentLanguage->n_a;
+						}
+						else if (tmpChannel.encKeyIndex == 0)
+						{
+							strcpy(rightSideVar, "Off");
+						}
+						else
+						{
+							const KeySlot_t *ks = keystore_get(tmpChannel.encKeyIndex);
+							if (ks && (ks->flags & KEY_FLAG_SET) && ks->label[0])
+							{
+								int n = (KEY_LABEL_LEN < (int)sizeof(rightSideVar) - 1)
+								        ? KEY_LABEL_LEN : (int)sizeof(rightSideVar) - 1;
+								memcpy(rightSideVar, ks->label, (size_t)n);
+								rightSideVar[n] = 0;
+							}
+							else
+							{
+								snprintf(rightSideVar, sizeof(rightSideVar), "Slot %u",
+								         (unsigned)tmpChannel.encKeyIndex);
+							}
+						}
+					}
+					break;
 				}
 
 				if (leftSide != NULL)
@@ -1364,6 +1397,10 @@ static void handleEvent(uiEvent_t *ev)
 						codeplugChannelSetFlag(&tmpChannel, CHANNEL_FLAG_FORCE_DMO, 1);// Set Channel DMR Force DMO Bit
 					}
 					break;
+			case CH_DETAILS_ENC_KEY:
+				/* AES patch: CH_DETAILS_ENC_KEY RIGHT */
+				if (tmpChannel.encKeyIndex < KEY_SLOT_COUNT) tmpChannel.encKeyIndex++;
+				break;
 			}
 
 			if (ev->events & FUNCTION_EVENT)
@@ -1617,6 +1654,10 @@ static void handleEvent(uiEvent_t *ev)
 						codeplugChannelSetFlag(&tmpChannel, CHANNEL_FLAG_FORCE_DMO, 0);// Clear Channel DMR Force DMO Bit
 					}
 					break;
+			case CH_DETAILS_ENC_KEY:
+				/* AES patch: CH_DETAILS_ENC_KEY LEFT */
+				if (tmpChannel.encKeyIndex > 0) tmpChannel.encKeyIndex--;
+				break;
 			}
 
 			if (ev->events & FUNCTION_EVENT)

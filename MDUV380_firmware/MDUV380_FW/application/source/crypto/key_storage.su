@@ -1,0 +1,7 @@
+../application/source/crypto/key_storage.c:25:13:ensure_loaded	24	static
+../application/source/crypto/key_storage.c:36:6:keystore_init	0	static
+../application/source/crypto/key_storage.c:38:6:keystore_save	0	static
+../application/source/crypto/key_storage.c:44:18:keystore_get	8	static
+../application/source/crypto/key_storage.c:51:12:keystore_get_mut	0	static
+../application/source/crypto/key_storage.c:58:6:keystore_clear	8	static
+../application/source/crypto/key_storage.c:66:5:keystore_is_set	8	static

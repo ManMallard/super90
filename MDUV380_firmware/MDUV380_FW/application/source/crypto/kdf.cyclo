@@ -1,0 +1,2 @@
+../application/source/crypto/kdf.c:16:13:hmac_sha256	3
+../application/source/crypto/kdf.c:49:6:pbkdf2_hmac_sha256	4

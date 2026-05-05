@@ -165,6 +165,8 @@ static menuFunctionData_t menuFunctions[] =
 		{ menuThemeItemsBrowser,    NULL, NULL, 0 },
 		{ menuColourPicker,         NULL, NULL, 0 },
 #endif
+		{ menuKeyManagement,      NULL, NULL, 0 },
+		{ menuKeyEntry,           NULL, NULL, 0 },
 };
 
 static void menuSystemCheckForFirstEntryAudible(menuStatus_t status)
@@ -659,6 +661,7 @@ const menuItemNewData_t mainMenuItems[] =
 #if defined(HAS_GPS)
 	{ 195, MENU_GPS		        },
 #endif
+	{   2, MENU_KEY_MANAGEMENT  }, /* AES patch: shows "Credits" placeholder */
 };
 
 const menuItemsList_t menuDataMainMenu =

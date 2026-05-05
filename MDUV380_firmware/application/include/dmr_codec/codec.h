@@ -48,9 +48,9 @@
 #define QU(X) QUAUX(X)
 
 #if defined(PLATFORM_MD9600) || defined(PLATFORM_MDUV380) || defined(PLATFORM_MD380)  || defined(PLATFORM_RT84_DM1701)
-#define AMBE_DECODE 0x08075954;
-#define AMBE_ENCODE 0x080754ac;
-#define AMBE_ENCODE_ECC 0x08075864;
+#define AMBE_DECODE 0x08075955    /* AES patch: BLX fix */
+#define AMBE_ENCODE 0x080754ad    /* AES patch: BLX fix */
+#define AMBE_ENCODE_ECC 0x08075865    /* AES patch: BLX fix */
 #else
 #define AMBE_DECODE 0x0005543D;
 #define AMBE_ENCODE 0x00054F94;

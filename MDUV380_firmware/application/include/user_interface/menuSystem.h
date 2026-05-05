@@ -337,6 +337,8 @@ enum MENU_SCREENS
 	MENU_THEME_ITEMS_BROWSER,
 	MENU_COLOUR_PICKER,
 #endif
+	MENU_KEY_MANAGEMENT,
+	MENU_KEY_ENTRY,
 	NUM_MENU_ENTRIES
 };
 
@@ -459,6 +461,8 @@ menuStatus_t menuDisplayOptions(uiEvent_t *event, bool isFirstRun);
 menuStatus_t menuSoundOptions(uiEvent_t *event, bool isFirstRun);
 menuStatus_t menuCredits(uiEvent_t *event, bool isFirstRun);
 menuStatus_t menuChannelDetails(uiEvent_t *event, bool isFirstRun);
+menuStatus_t menuKeyManagement(uiEvent_t *event, bool isFirstRun);
+menuStatus_t menuKeyEntry(uiEvent_t *event, bool isFirstRun);
 menuStatus_t menuHotspotMode(uiEvent_t *event, bool isFirstRun);
 menuStatus_t menuLockScreen(uiEvent_t *event, bool isFirstRun);
 menuStatus_t menuContactList(uiEvent_t *event, bool isFirstRun);

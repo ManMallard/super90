@@ -43,6 +43,7 @@
 #include "interfaces/gps.h"
 #if defined(PLATFORM_MD9600) || defined(PLATFORM_MD380) || defined(PLATFORM_MDUV380) || defined(PLATFORM_RT84_DM1701) || defined(PLATFORM_MD2017)
 #include "hardware/radioHardwareInterface.h"
+#include "crypto/dmr_crypto.h"
 #endif
 
 #define QSODATA_TIMER_TIMEOUT            2400
@@ -1159,6 +1160,13 @@ static inline void hrc6000SysReceivedDataInt(void)
 				}
 
 				SPI1ReadPageRegByteArray(0x03, 0x00, DMR_frame_buffer + LC_DATA_LENGTH, AMBE_AUDIO_LENGTH);
+				/* AES patch: decrypt 27-byte AMBE voice payload right after chip RX */
+				if (dmr_crypto_rx_active() && currentChannelData != NULL
+				    && currentChannelData->chMode == RADIO_MODE_DIGITAL)
+				{
+					static uint32_t rxSuperframeNumber = 0;
+					dmr_crypto_rx_frame(DMR_frame_buffer + LC_DATA_LENGTH, rxSuperframeNumber++);
+				}
 
 				if (settingsUsbMode == USB_MODE_HOTSPOT)
 				{
@@ -1774,6 +1782,14 @@ void hrc6000TimeslotInterruptHandler(void)
 
 					if (hrc.hotspotDMRTxFrameBufferEmpty == false)
 					{
+						/* AES patch: encrypt 27-byte AMBE voice payload before chip TX (hotspot) */
+						if (dmr_crypto_tx_active() && currentChannelData != NULL
+						    && currentChannelData->chMode == RADIO_MODE_DIGITAL)
+						{
+							static uint32_t txSuperframeNumberHS = 0;
+							dmr_crypto_tx_frame((uint8_t *)(deferredUpdateBuffer + LC_DATA_LENGTH),
+							                    txSuperframeNumberHS++);
+						}
 						SPI1WritePageRegByteArray(0x03, 0x00, (uint8_t*)(deferredUpdateBuffer + LC_DATA_LENGTH), AMBE_AUDIO_LENGTH); // send the audio bytes to the hardware
 						hrc.hotspotDMRTxFrameBufferEmpty = true; // we have finished with the current frame data from the hotspot
 					}
@@ -1796,6 +1812,14 @@ void hrc6000TimeslotInterruptHandler(void)
 
 					if (hrc.ambeBufferCount >= NUM_AMBE_BLOCK_PER_DMR_FRAME)
 					{
+						/* AES patch: encrypt 27-byte AMBE voice payload before chip TX (local) */
+						if (dmr_crypto_tx_active() && currentChannelData != NULL
+						    && currentChannelData->chMode == RADIO_MODE_DIGITAL)
+						{
+							static uint32_t txSuperframeNumber = 0;
+							dmr_crypto_tx_frame((uint8_t *)hrc.deferredUpdateBufferOutPtr,
+							                    txSuperframeNumber++);
+						}
 						SPI1WritePageRegByteArray(0x03, 0x00, (uint8_t*)hrc.deferredUpdateBufferOutPtr, AMBE_AUDIO_LENGTH);// send the audio bytes to the hardware
 						hrc.deferredUpdateBufferOutPtr += AMBE_AUDIO_LENGTH;
 

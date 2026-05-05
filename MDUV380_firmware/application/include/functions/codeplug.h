@@ -220,7 +220,7 @@ typedef struct
 	uint8_t rxSignaling;    // +--
 	uint8_t artsInterval;   // | These 3 bytes were repurposed for optional DMRID
 	uint8_t encrypt;        // +--
-	uint8_t _UNUSED_2;
+	uint8_t encKeyIndex; /* AES patch: 0=off, 1..16=key slot */
 	uint8_t rxGroupList; // a.k.a TG List
 	uint8_t txColor;
 	uint8_t aprsConfigIndex;
