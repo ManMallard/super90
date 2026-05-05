@@ -19,6 +19,8 @@
 #include <math.h>
 #include "hardware/EEPROM.h"
 #include "user_interface/menuSystem.h"
+#include "crypto/enc_indicator.h"
+
 #include "user_interface/uiUtilities.h"
 #include "user_interface/uiLocalisation.h"
 #include "hardware/HR-C6000.h"
@@ -1493,6 +1495,9 @@ void uiUtilityRenderHeader(bool isVFODualWatchScanning)
 		snprintf(buffer, bufferLen, "%d%%", getBatteryPercentage());
 		ucPrintCore(0, DISPLAY_Y_POS_HEADER, buffer, FONT_SIZE_1, TEXT_ALIGN_RIGHT, false);// Display battery percentage at the right
 	}
+
+	/* AES patch: render ENC badge if encryption is configured */
+	enc_indicator_draw();
 }
 
 void uiUtilityRedrawHeaderOnly(bool isVFODualWatchScanning)

@@ -118,7 +118,9 @@ static menuFunctionData_t menuFunctions[] =
 		{ menuContactDetails,       0 },
 		{ menuLanguage,             0 },
 		{ menuPrivateCall,          0 },
-		{ uiMessageBox,             0 }
+		{ uiMessageBox,             0 },
+		{ menuKeyManagement,        0 },
+		{ menuKeyEntry,             0 }
 };
 
 static void menuSystemCheckForFirstEntryAudible(menuStatus_t status)
@@ -362,11 +364,12 @@ const menuItemNewData_t mainMenuItems[] =
 	{  12, MENU_CHANNEL_DETAILS },
 	{  13, MENU_LANGUAGE        },
 	{   2, MENU_CREDITS         },
+	{   2, MENU_KEY_MANAGEMENT  },
 };
 
 const menuItemsList_t menuDataMainMenu =
 {
-	.numItems = 12,
+	.numItems = 13,
 	.items = mainMenuItems
 };
 

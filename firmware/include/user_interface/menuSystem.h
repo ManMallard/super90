@@ -220,6 +220,8 @@ enum MENU_SCREENS
 	MENU_LANGUAGE,
 	UI_PRIVATE_CALL,
 	UI_MESSAGE_BOX,
+	MENU_KEY_MANAGEMENT,
+	MENU_KEY_ENTRY,
 	NUM_MENU_ENTRIES
 };
 
@@ -291,9 +293,10 @@ menuStatus_t menuLockScreen(uiEvent_t *event, bool isFirstRun);
 menuStatus_t menuContactList(uiEvent_t *event, bool isFirstRun);
 menuStatus_t menuContactListSubMenu(uiEvent_t *event, bool isFirstRun);
 menuStatus_t menuContactDetails(uiEvent_t *event, bool isFirstRun);
+menuStatus_t menuKeyManagement(uiEvent_t *ev, bool isFirstRun);
+menuStatus_t menuKeyEntry(uiEvent_t *ev, bool isFirstRun);
 menuStatus_t menuLanguage(uiEvent_t *event, bool isFirstRun);
 menuStatus_t menuPrivateCall(uiEvent_t *event, bool isFirstRun);
-
 menuStatus_t uiMessageBox(uiEvent_t *event, bool isFirstRun);
 
 

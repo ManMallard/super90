@@ -142,6 +142,7 @@ typedef struct
 	uint8_t VFOflag5;// upper 4 bits are the step frequency 2.5,5,6.25,10,12.5,25,30,50kHz
 	uint8_t sql;// Does not seem to be used in the official firmware and seems to be always set to 0
 	uint8_t NOT_IN_CODEPLUG_flag; // bit 0x01 = vfo channel
+	uint8_t encKeyIndex; /* 0=off, 1..16 = key slow */
 } struct_codeplugChannel_t;
 
 typedef struct

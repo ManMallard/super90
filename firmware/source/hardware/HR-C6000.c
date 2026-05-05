@@ -20,6 +20,9 @@
 
 #include "hotspot/dmrDefines.h"
 #include "hardware/HR-C6000.h"
+#include "crypto/dmr_crypto.h"
+#include "crypto/key_storage.h"
+
 #include "functions/settings.h"
 #if defined(USING_EXTERNAL_DEBUGGER)
 #include "SeggerRTT/RTT/SEGGER_RTT.h"
@@ -764,7 +767,14 @@ inline static void HRC6000SysReceivedDataInt(void)
 					triggerQSOdataDisplay();
 				}
 
-				SPI1ReadPageRegByteArray(0x03, 0x00, DMR_frame_buffer + 0x0C, 27);
+                SPI1ReadPageRegByteArray(0x03, 0x00, DMR_frame_buffer + 0x0C, 27);
+                /* AES patch: decrypt 27-byte AMBE voice payload right after chip RX */
+                if (dmr_crypto_rx_active() && currentChannelData != NULL
+                    && currentChannelData->chMode == RADIO_MODE_DIGITAL)
+                {
+                        static uint32_t rxSuperframeNumber = 0;
+                        dmr_crypto_rx_frame(DMR_frame_buffer + 0x0C, rxSuperframeNumber++);
+                }
 
 				if (settingsUsbMode == USB_MODE_HOTSPOT)
 				{
@@ -1099,10 +1109,18 @@ inline static void HRC6000TimeslotInterruptHandler(void)
 							transmitTalkerAlias();
 						}
 					}
-					if (ambeBufferCount >= NUM_AMBE_BLOCK_PER_DMR_FRAME)
-					{
-						SPI1WritePageRegByteArray(0x03, 0x00, (uint8_t*)deferredUpdateBufferOutPtr, 27);// send the audio bytes to the hardware
-						deferredUpdateBufferOutPtr += 27;
+                    if (ambeBufferCount >= NUM_AMBE_BLOCK_PER_DMR_FRAME)
+                    {
+                            /* AES patch: encrypt 27-byte AMBE voice payload before chip TX */
+                            if (dmr_crypto_tx_active() && currentChannelData != NULL
+                                && currentChannelData->chMode == RADIO_MODE_DIGITAL)
+                            {
+                                    static uint32_t txSuperframeNumber = 0;
+                                    dmr_crypto_tx_frame((uint8_t *)deferredUpdateBufferOutPtr,
+                                                        txSuperframeNumber++);
+                            }
+                            SPI1WritePageRegByteArray(0x03, 0x00, (uint8_t*)deferredUpdateBufferOutPtr, 27);// send the audio bytes to the hardware
+                            deferredUpdateBufferOutPtr += 27;
 
 						if (deferredUpdateBufferOutPtr > deferredUpdateBufferEnd)
 						{
@@ -1122,10 +1140,18 @@ inline static void HRC6000TimeslotInterruptHandler(void)
 						SPI0WritePageRegByteArray(0x02, 0x00, (uint8_t*)deferredUpdateBuffer, 0x0c);// put LC into hardware
 					}
 
-					if (!hotspotDMRTxFrameBufferEmpty)
-					{
-						SPI1WritePageRegByteArray(0x03, 0x00, (uint8_t*)(deferredUpdateBuffer+0x0C), 27);// send the audio bytes to the hardware
-					}
+                    if (!hotspotDMRTxFrameBufferEmpty)
+                    {
+                            /* AES patch: encrypt 27-byte AMBE voice payload before chip TX (hotspot path) */
+                            if (dmr_crypto_tx_active() && currentChannelData != NULL
+                                && currentChannelData->chMode == RADIO_MODE_DIGITAL)
+                            {
+                                    static uint32_t txSuperframeNumberHS = 0;
+                                    dmr_crypto_tx_frame((uint8_t *)(deferredUpdateBuffer + 0x0C),
+                                                        txSuperframeNumberHS++);
+                            }
+                            SPI1WritePageRegByteArray(0x03, 0x00, (uint8_t*)(deferredUpdateBuffer+0x0C), 27);// send the audio bytes to the hardware
+                    }
 					else
 					{
 						SPI1WritePageRegByteArray(0x03, 0x00, SILENCE_AUDIO, 27);// send the audio bytes to the hardware

@@ -21,6 +21,8 @@
 #include "functions/settings.h"
 #include "functions/trx.h"
 #include "user_interface/menuSystem.h"
+#include "crypto/key_storage.h"
+
 #include "user_interface/uiUtilities.h"
 #include "user_interface/uiLocalisation.h"
 
@@ -60,6 +62,7 @@ enum CHANNEL_DETAILS_DISPLAY_LIST { CH_DETAILS_NAME = 0,
 									CH_DETAILS_VOX,
 									CH_DETAILS_POWER,
 									CH_DETAILS_SQUELCH,
+									CH_DETAILS_ENC_KEY,
 									NUM_CH_DETAILS_ITEMS};// The last item in the list is used so that we automatically get a total number of items in the list
 
 
@@ -395,6 +398,32 @@ static void updateScreen(bool isFirstRun, bool allowedToSpeakUpdate)
 							{
 								snprintf(rightSideVar, bufferLen, "%d%%", (5 * (tmpChannel.sql - 1)));
 							}
+						}
+						break;
+					case CH_DETAILS_ENC_KEY:
+						if (tmpChannel.chMode == RADIO_MODE_DIGITAL)
+						{
+							uint8_t idx = tmpChannel.encKeyIndex;
+							if (idx == 0)
+							{
+								snprintf(rightSideVar, bufferLen, "Enc Key:Off");
+							}
+							else
+							{
+								const key_slot_t *ks = keystore_get(idx);
+								if (ks && ks->label[0])
+								{
+									snprintf(rightSideVar, bufferLen, "Enc:%u %.8s", idx, ks->label);
+								}
+								else
+								{
+									snprintf(rightSideVar, bufferLen, "Enc Key:%u", idx);
+								}
+							}
+						}
+						else
+						{
+							rightSideConst = (char * const *)&currentLanguage->n_a;
 						}
 						break;
 				}
@@ -843,6 +872,12 @@ static void handleEvent(uiEvent_t *ev)
 						}
 					}
 					break;
+				case CH_DETAILS_ENC_KEY:
+					if (tmpChannel.chMode == RADIO_MODE_DIGITAL && tmpChannel.encKeyIndex < KEY_SLOT_COUNT)
+					{
+						tmpChannel.encKeyIndex++;
+					}
+					break;
 
 			}
 
@@ -998,6 +1033,12 @@ static void handleEvent(uiEvent_t *ev)
 						{
 							tmpChannel.sql--;
 						}
+					}
+					break;
+				case CH_DETAILS_ENC_KEY:
+					if (tmpChannel.chMode == RADIO_MODE_DIGITAL && tmpChannel.encKeyIndex > 0)
+					{
+						tmpChannel.encKeyIndex--;
 					}
 					break;
 			}
