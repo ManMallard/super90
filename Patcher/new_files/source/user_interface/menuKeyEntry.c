@@ -6,6 +6,13 @@
  *
  * The mode + slot are set via menuKeyEntry_*(slot1based) before the menu
  * is pushed; menuKeyEntry() routes each event accordingly.
+ *
+ * AES patch UI changes:
+ *   - Passphrase characters are NOT masked during entry (full cleartext).
+ *   - When re-entering an already-set slot, the existing passphrase is
+ *     loaded as a starting point so the user can edit it.
+ *   - KEY_LEFT performs backspace (one char delete).
+ *   - The help line shows BACK/SAVE/CANCEL hints.
  */
 #include <string.h>
 #include <stdio.h>
@@ -26,7 +33,8 @@
 
 static uint8_t  s_slot;
 static uint8_t  s_mode;
-static char     s_buf[64 + 1];
+static char     s_buf[KEY_PASSPHRASE_MAX + 1];   /* passphrase or label buffer */
+static char     s_hexbuf[64 + 1];                /* hex buffer (separate, larger) */
 static int      s_len;
 static uint8_t  s_t9_lastKey;
 static uint8_t  s_t9_tapIndex;
@@ -46,31 +54,62 @@ static const char *t9map[10] = {
     "wxyz9WXYZ" /* 9 */
 };
 
+static char *active_buf(void)
+{
+    return (s_mode == MODE_HEX) ? s_hexbuf : s_buf;
+}
+
+static int active_buf_size(void)
+{
+    return (s_mode == MODE_HEX) ? (int)sizeof(s_hexbuf) : (int)sizeof(s_buf);
+}
+
 static void render(void)
 {
     displayClearBuf();
+
+    /* AES patch: compact layout for ~64px-tall display (HX8353E).
+     *
+     *   Row  0 (12px): "Slot N: <Title>"  e.g. "Slot 3: Passphrase"
+     *   Row 14 (10px): "Cur: ***X***X..."  (only if re-entering populated)
+     *   Row 26 (16px): live edit buffer  -- the typing area
+     *   Row 50 (10px): "L<- G=ok R=x"   -- compact help line
+     */
+    char titleLine[28];
     const char *title = (s_mode == MODE_PASS)  ? "Passphrase"
                       : (s_mode == MODE_HEX)   ? "Hex Key"
                       : (s_mode == MODE_LABEL) ? "Label"
                       : "Entry";
-    displayPrintCentered(0, title, FONT_SIZE_2);
+    snprintf(titleLine, sizeof(titleLine), "Slot %u: %s", (unsigned)s_slot, title);
+    displayPrintAt(0, 0, titleLine, FONT_SIZE_1);
 
-    char header[20];
-    snprintf(header, sizeof(header), "Slot %u", (unsigned)s_slot);
-    displayPrintAt(2, 16, header, FONT_SIZE_1);
-
-    /* Show what's been typed (passphrase masked unless it's the last char
-     * within the T9 commit window). */
-    char shown[20] = {0};
-    int show = s_len > 18 ? 18 : s_len;
-    for (int i = 0; i < show; ++i) {
-        bool last = (i == s_len - 1)
-                  && ((ticksGetMillis() - s_t9_lastMs) < 700);
-        shown[i] = (s_mode == MODE_PASS && !last) ? '*' : s_buf[i];
+    /* AES patch: if re-entering a populated PASSPHRASE slot, show the
+     * stored asterisk pattern as a read-only reference line. */
+    if (s_mode == MODE_PASS) {
+        const KeySlot_t *ks = keystore_get(s_slot);
+        if (ks && (ks->flags & KEY_FLAG_SET)
+            && ks->entryMode == KEY_ENTRY_PASSPHRASE
+            && ks->passPreview[0] != 0)
+        {
+            char cur[KEY_PASS_PREVIEW_LEN + 8];
+            char preview[KEY_PASS_PREVIEW_LEN + 1] = {0};
+            memcpy(preview, ks->passPreview, KEY_PASS_PREVIEW_LEN);
+            snprintf(cur, sizeof(cur), "Cur:%s", preview);
+            displayPrintAt(0, 14, cur, FONT_SIZE_1);
+        }
     }
+
+    /* AES patch: passphrase shown in cleartext (no masking) so the user
+     * can verify what they typed. Only the slot LIST shows the masked
+     * preview pattern. */
+    char shown[33] = {0};
+    const char *src = active_buf();
+    int show = s_len > 30 ? 30 : s_len;
+    for (int i = 0; i < show; ++i) shown[i] = src[i];
     shown[show] = 0;
-    displayPrintAt(2, 28, shown, FONT_SIZE_2);
-    displayPrintAt(2, 48, "GREEN=save  RED=cancel", FONT_SIZE_1);
+    displayPrintAt(0, 26, shown, FONT_SIZE_2);
+
+    displayPrintAt(0, 50, "L<- G=ok R=x", FONT_SIZE_1);
     displayRender();
 }
 
@@ -97,8 +136,8 @@ static void t9_tap(int digit)
 static void hex_tap(int hexnyb)
 {
     if (s_len >= 64) return;
-    s_buf[s_len++] = (hexnyb < 10) ? ('0' + hexnyb) : ('a' + hexnyb - 10);
-    s_buf[s_len] = 0;
+    s_hexbuf[s_len++] = (hexnyb < 10) ? ('0' + hexnyb) : ('a' + hexnyb - 10);
+    s_hexbuf[s_len] = 0;
 }
 
 static int unhex(char c)
@@ -119,10 +158,25 @@ static void commit_passphrase(void)
                        PBKDF2_ITERATIONS, ks->key, KEY_BYTES);
     ks->entryMode = KEY_ENTRY_PASSPHRASE;
     ks->flags |= KEY_FLAG_SET;
+
+    /* AES patch: store ONLY the asterisk pattern (every 4th char visible),
+     * not the cleartext. This prevents the passphrase from being recovered
+     * if the EEPROM is dumped, while still letting the user verify they
+     * have the right slot. */
+    memset(ks->passPreview, 0, sizeof(ks->passPreview));
+    int n = (s_len < KEY_PASS_PREVIEW_LEN) ? s_len : KEY_PASS_PREVIEW_LEN;
+    for (int i = 0; i < n; i++) {
+        ks->passPreview[i] = (((i + 1) % 4) == 0) ? s_buf[i] : '*';
+    }
+
     if (ks->label[0] == 0) {
         snprintf(ks->label, KEY_LABEL_LEN, "Slot %u", (unsigned)s_slot);
     }
     keystore_save();
+
+    /* AES patch: scrub the cleartext from RAM as soon as it's been hashed. */
+    memset(s_buf, 0, sizeof(s_buf));
+    s_len = 0;
 }
 
 static void commit_hex(void)
@@ -131,13 +185,15 @@ static void commit_hex(void)
     KeySlot_t *ks = keystore_get_mut(s_slot);
     if (!ks) return;
     for (int i = 0; i < 32; ++i) {
-        int hi = unhex(s_buf[i*2]);
-        int lo = unhex(s_buf[i*2+1]);
+        int hi = unhex(s_hexbuf[i*2]);
+        int lo = unhex(s_hexbuf[i*2+1]);
         if (hi < 0 || lo < 0) return;
         ks->key[i] = (uint8_t)((hi << 4) | lo);
     }
     ks->entryMode = KEY_ENTRY_HEX;
     ks->flags |= KEY_FLAG_SET;
+    /* Hex entries don't have a passphrase to preview. */
+    memset(ks->passPreview, 0, sizeof(ks->passPreview));
     if (ks->label[0] == 0) {
         snprintf(ks->label, KEY_LABEL_LEN, "Slot %u", (unsigned)s_slot);
     }
@@ -154,15 +210,38 @@ static void commit_label(void)
     keystore_save();
 }
 
+static void prepopulate_from_slot(void)
+{
+    memset(s_buf, 0, sizeof(s_buf));
+    memset(s_hexbuf, 0, sizeof(s_hexbuf));
+    s_len = 0;
+    s_t9_lastKey = 0xFF;
+    s_t9_tapIndex = 0;
+    s_t9_lastMs = 0;
+
+    /* AES patch: passphrase mode CANNOT prepopulate — only the asterisk
+     * pattern is stored, not the cleartext, so recovery is impossible.
+     * Re-entering a passphrase always starts from an empty buffer. */
+    const KeySlot_t *ks = keystore_get(s_slot);
+    if (!ks || !(ks->flags & KEY_FLAG_SET)) return;
+
+    if (s_mode == MODE_LABEL && ks->label[0] != 0)
+    {
+        char lab[KEY_LABEL_LEN + 1] = {0};
+        memcpy(lab, ks->label, KEY_LABEL_LEN);
+        size_t ln = strnlen(lab, KEY_LABEL_LEN);
+        memcpy(s_buf, lab, ln);
+        s_buf[ln] = 0;
+        s_len = (int)ln;
+    }
+    /* Hex mode and passphrase mode start empty. */
+}
+
 /* Routed event handler. */
 static menuStatus_t common_event(uiEvent_t *ev, bool isFirstRun)
 {
     if (isFirstRun) {
-        memset(s_buf, 0, sizeof(s_buf));
-        s_len = 0;
-        s_t9_lastKey = 0xFF;
-        s_t9_tapIndex = 0;
-        s_t9_lastMs = 0;
+        prepopulate_from_slot();
         render();
         return MENU_STATUS_SUCCESS;
     }
@@ -180,7 +259,10 @@ static menuStatus_t common_event(uiEvent_t *ev, bool isFirstRun)
         return MENU_STATUS_SUCCESS;
     }
     if (KEYCHECK_SHORTUP(ev->keys, KEY_LEFT)) {  /* backspace */
-        if (s_len > 0) { s_buf[--s_len] = 0; }
+        if (s_len > 0) {
+            char *buf = active_buf();
+            buf[--s_len] = 0;
+        }
         s_t9_lastKey = 0xFF;
         render();
         return MENU_STATUS_SUCCESS;

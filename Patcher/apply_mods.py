@@ -151,9 +151,13 @@ HRC_TX_HOTSPOT = """\
 """
 
 HRC_RX = """\
-\t\t\t\t/* AES patch: decrypt 27-byte AMBE voice payload right after chip RX */
+\t\t\t\t/* AES patch: decrypt 27-byte AMBE voice payload right after chip RX.
+\t\t\t\t * dmr_crypto_rx_should_decrypt_this_call() is the per-call autodetect
+\t\t\t\t * gate for PTT mode: if the most recent LC had no encryption magic
+\t\t\t\t * byte, this returns 0 and we leave the audio plaintext. */
 \t\t\t\tif (dmr_crypto_rx_active() && currentChannelData != NULL
-\t\t\t\t    && currentChannelData->chMode == RADIO_MODE_DIGITAL)
+\t\t\t\t    && currentChannelData->chMode == RADIO_MODE_DIGITAL
+\t\t\t\t    && dmr_crypto_rx_should_decrypt_this_call())
 \t\t\t\t{
 \t\t\t\t\tstatic uint32_t rxSuperframeNumber = 0;
 \t\t\t\t\tdmr_crypto_rx_frame(DMR_frame_buffer + LC_DATA_LENGTH, rxSuperframeNumber++);
@@ -409,6 +413,42 @@ def mod_menuSystem_c_data() -> None:
     src = src[:line_start] + payload + src[line_start:]
     write(p, src)
     print("  menuSystem.c: appended NULL entries to menuDataGlobal.data[]")
+
+
+# ---------------------------------------------------------------------------
+# 4c. menuSystem.c — _Static_assert that menuFunctions[] count == NUM_MENU_ENTRIES
+#     This catches future drift between the enum and the parallel arrays
+#     (the same kind of drift that produced the menuKeyEntry freeze).
+# ---------------------------------------------------------------------------
+def mod_menuSystem_c_assert() -> None:
+    p = SRC / "user_interface" / "menuSystem.c"
+    if not p.exists():
+        return
+    src = read(p)
+    if "menuFunctions[] and MENU_SCREENS enum are out of sync" in src:
+        return
+    # Anchor on the closing `};` of menuFunctions[]
+    m = re.search(r"\{\s*menuKeyEntry\s*,[^}]*\}\s*,\s*\n\}\s*;\s*\n", src)
+    if not m:
+        todo("menuSystem.c: could not find menuFunctions[] close to attach _Static_assert")
+        return
+    insert_at = m.end()
+    payload = (
+        "\n"
+        "/* AES patch: enforce that the parallel arrays stay in sync.\n"
+        " * If anyone adds an entry to MENU_SCREENS without adding a corresponding\n"
+        " * row to menuFunctions[] (and a NULL slot to menuDataGlobal.data[]),\n"
+        " * this build-time assertion fires and the build fails loudly instead\n"
+        " * of producing a binary that hard-freezes the radio at runtime. */\n"
+        "_Static_assert((sizeof(menuFunctions) / sizeof(menuFunctions[0])) == NUM_MENU_ENTRIES,\n"
+        "               \"menuFunctions[] and MENU_SCREENS enum are out of sync — \"\n"
+        "               \"every MENU_* enum entry must have a matching menuFunctions[] row \"\n"
+        "               \"AND a NULL slot in menuDataGlobal.data[]\");\n"
+    )
+    write(p, src[:insert_at] + payload + src[insert_at:])
+    print("  menuSystem.c: added _Static_assert for menuFunctions[] consistency")
+
+
 # ---------------------------------------------------------------------------
 def mod_menuChannelDetails() -> None:
     p = SRC / "user_interface" / "menuChannelDetails.c"
@@ -736,8 +776,44 @@ def mod_codec_blx_fix() -> None:
 
 
 # ---------------------------------------------------------------------------
-# 9. menuRadioInfos.c — gate location validity on GPS being on
+# trx.c — wire up aes_patch_engage_for_current_channel() at DMR TX activation
 # ---------------------------------------------------------------------------
+def mod_trx_engage() -> None:
+    p = SRC / "functions" / "trx.c"
+    if not p.exists():
+        todo(f"trx.c not found at {p}")
+        return
+    src = read(p)
+    if "aes_patch_engage_for_current_channel" in src:
+        return
+    # Add include
+    if '#include "crypto/dmr_crypto.h"' not in src:
+        m = list(re.finditer(r'^#include\s+["<][^"\s>]+["<>]\s*$', src, re.M))
+        if not m:
+            todo("trx.c: could not find any #include line to anchor crypto include")
+            return
+        last = m[-1]
+        src = src[:last.end()] + '\n#include "crypto/dmr_crypto.h"' + src[last.end():]
+
+    # Insert engage call as the first thing inside trxActivateDMRTx()
+    anchor = "void trxActivateDMRTx(void)\n{\n\ttrxActivateTx(false);"
+    if anchor not in src:
+        todo("trx.c: trxActivateDMRTx() body not as expected - add "
+             "aes_patch_engage_for_current_channel() call manually")
+        return
+    new_body = (
+        "void trxActivateDMRTx(void)\n{\n"
+        "\t/* AES patch: engage or tear down encryption based on the channel's "
+        "encKeyIndex and the slot's populated state. Must run BEFORE the chip "
+        "starts emitting voice frames so the SPI taps see the right s_txActive. */\n"
+        "\taes_patch_engage_for_current_channel();\n"
+        "\ttrxActivateTx(false);"
+    )
+    src = src.replace(anchor, new_body, 1)
+    write(p, src)
+    print("  trx.c: aes_patch_engage_for_current_channel() wired into trxActivateDMRTx()")
+
+
 def mod_radioInfos_gps_check() -> None:
     p = SRC / "user_interface" / "menuRadioInfos.c"
     if not p.exists():
@@ -763,6 +839,64 @@ def mod_radioInfos_gps_check() -> None:
 
 
 # ---------------------------------------------------------------------------
+# Option A — LC-steal nonce wire format hooks in HR-C6000.c
+# Two TX hooks (after LC build, before SPI commit) and one RX hook.
+# ---------------------------------------------------------------------------
+def mod_lc_steal() -> None:
+    p = SRC / "hardware" / "HR-C6000.c"
+    if not p.exists():
+        return
+    src = read(p)
+    if "aes_patch_lc_steal_apply_tx" in src:
+        return  # idempotent
+
+    # TX hook 1: hrc6000SendPcOrTgLCHeader, before the SPI commit.
+    old1 = ("\tspi_tx[11] = 0x00;\n"
+            "\tSPI0WritePageRegByteArray(0x02, 0x00, spi_tx, LC_DATA_LENGTH);\n"
+            "}")
+    new1 = ("\tspi_tx[11] = 0x00;\n"
+            "\t/* AES patch: Option A — stuff per-PTT random nonce into LC bytes\n"
+            "\t * before the SPI commit. No-op when active slot isn't in mode A. */\n"
+            "\taes_patch_lc_steal_apply_tx(spi_tx);\n"
+            "\tSPI0WritePageRegByteArray(0x02, 0x00, spi_tx, LC_DATA_LENGTH);\n"
+            "}")
+    if old1 in src:
+        src = src.replace(old1, new1, 1)
+        print("  HR-C6000.c: TX hook 1 (PcOrTgLCHeader) inserted")
+    else:
+        todo("HR-C6000.c: hrc6000SendPcOrTgLCHeader anchor not found")
+
+    # TX hook 2: hotspot path at line ~1780.
+    old2 = ("SPI0WritePageRegByteArray(0x02, 0x00, (uint8_t*)deferredUpdateBuffer, LC_DATA_LENGTH); "
+            "// put LC into hardware")
+    new2 = ("/* AES patch: Option A — stuff per-PTT random nonce into LC bytes (hotspot path) */\n"
+            "\t\t\t\t\t\taes_patch_lc_steal_apply_tx((uint8_t*)deferredUpdateBuffer);\n"
+            "\t\t\t\t\t\tSPI0WritePageRegByteArray(0x02, 0x00, (uint8_t*)deferredUpdateBuffer, LC_DATA_LENGTH); "
+            "// put LC into hardware")
+    if old2 in src:
+        src = src.replace(old2, new2, 1)
+        print("  HR-C6000.c: TX hook 2 (hotspot LC) inserted")
+    else:
+        todo("HR-C6000.c: hotspot LC SPI commit anchor not found")
+
+    # RX hook: hrc6000HandleLCData, right after SPI0ReadPageRegByteArray.
+    old3 = ("\tbool lcResult = (SPI0ReadPageRegByteArray(0x02, 0x00, LCBuf, LC_DATA_LENGTH) "
+            "== kStatus_Success); // read the LC from the C6000")
+    new3 = ("\tbool lcResult = (SPI0ReadPageRegByteArray(0x02, 0x00, LCBuf, LC_DATA_LENGTH) "
+            "== kStatus_Success); // read the LC from the C6000\n"
+            "\t/* AES patch: Option A — if this is an encrypted-mode-A LC, extract\n"
+            "\t * the per-PTT nonce and re-init RX. Idempotent. */\n"
+            "\tif (lcResult) { aes_patch_lc_steal_check_and_apply_rx(LCBuf); }")
+    if old3 in src:
+        src = src.replace(old3, new3, 1)
+        print("  HR-C6000.c: RX hook (HandleLCData) inserted")
+    else:
+        todo("HR-C6000.c: hrc6000HandleLCData anchor not found")
+
+    write(p, src)
+
+
+# ---------------------------------------------------------------------------
 # 10. menuFirmwareInfoScreen.c — strip contributor names from credits page
 # ---------------------------------------------------------------------------
 def mod_firmware_info_strip_names() -> None:
@@ -770,7 +904,7 @@ def mod_firmware_info_strip_names() -> None:
     if not p.exists():
         return
     src = read(p)
-    if "AES patch: contributor names removed" in src:
+    if "AES patch: contributors stripped, custom name added" in src:
         return
     # Anchor on the start of the array; brace-match to its `};`
     m = re.search(r"static\s+const\s+char\s*\*\s*creditTexts\s*\[\s*\]\s*=\s*\{", src)
@@ -798,7 +932,7 @@ def mod_firmware_info_strip_names() -> None:
     replacement = (
         "static const char *creditTexts[] =\n"
         "{\n"
-        "\t\t\"\" /* AES patch: contributor names removed */\n"
+        "\t\t\"Johnny Bravo\" /* AES patch: contributors stripped, custom name added */\n"
         "};"
     )
     write(p, src[:m.start()] + replacement + src[end:])
@@ -868,6 +1002,35 @@ def mod_lang_enc_keys() -> None:
                          "to the englishLanguage struct manually")
         else:
             print("  english.h: enc_keys already present, skipping")
+
+    # 11b2. All non-English language files — fall back to English literal "Enc Keys"
+    #       so the menu label renders correctly even if the user has selected a
+    #       non-English language. Edits happen as raw bytes because some language
+    #       files contain non-UTF-8 characters (Japanese, Eastern European, etc.).
+    other_langs = ["catalan.h","croatian.h","czech.h","danish.h","dutch.h","finnish.h",
+                   "french.h","german.h","hungarian.h","italian.h","japanese.h","polish.h",
+                   "portugues_brazil.h","portuguese.h","romanian.h","slovenian.h",
+                   "spanish.h","swedish.h","turkish.h"]
+    added = 0
+    for fname in other_langs:
+        lp = INC / "user_interface" / "languages" / fname
+        if not lp.exists():
+            continue
+        with open(lp, "rb") as fp:
+            buf = fp.read()
+        if b"enc_keys" in buf:
+            continue
+        m = re.search(rb"(\.mute\b[^\n]*\n)", buf)
+        if not m:
+            todo(f"{fname}: no .mute anchor for enc_keys English fallback - add manually")
+            continue
+        new_line = b'.enc_keys\t\t\t\t= "Enc Keys", // English fallback -- AES patch\n'
+        new_buf = buf[:m.end()] + new_line + buf[m.end():]
+        with open(lp, "wb") as fp:
+            fp.write(new_buf)
+        added += 1
+    if added:
+        print(f"  {added} non-English language file(s) got English fallback for enc_keys")
 
     # 11c. menuSystem.c — add #include <stddef.h> and update mainMenuItems[]
     #      stringOffset for MENU_KEY_MANAGEMENT to use offsetof().
@@ -950,9 +1113,12 @@ def main() -> int:
     mod_menuSystem_h()
     mod_menuSystem_c()
     mod_menuSystem_c_data()
+    mod_menuSystem_c_assert()
     mod_menuChannelDetails()
     mod_uiUtilities()
     mod_codec_blx_fix()
+    mod_trx_engage()
+    mod_lc_steal()
     mod_radioInfos_gps_check()
     mod_firmware_info_strip_names()
     mod_lang_enc_keys()

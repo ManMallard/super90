@@ -12,7 +12,7 @@
 #include "crypto/key_storage.h"
 #include "hardware/EEPROM.h"
 
-#define KS_MAGIC 0x4F4B5931u   /* 'O' 'K' 'Y' '1' */
+#define KS_MAGIC 0x4F4B5935u   /* 'OKY5' — bumped from OKY4 when default new-slot mode changed to PTT */
 
 typedef struct {
     uint32_t magic;
@@ -29,6 +29,17 @@ static void ensure_loaded(void)
     if (s_bank.magic != KS_MAGIC) {
         memset(&s_bank, 0, sizeof(s_bank));
         s_bank.magic = KS_MAGIC;
+        /* AES patch: default new bank to PTT mode (per-PTT nonce). */
+        for (int i = 0; i < KEY_SLOT_COUNT; i++) {
+            s_bank.slot[i].nonceMode = NONCE_MODE_A_LC_STEAL;
+        }
+    }
+    /* AES patch: normalize stale nonceMode values. Option B was removed,
+     * so any slot with nonceMode > A_LC_STEAL falls back to DETERMINISTIC. */
+    for (int i = 0; i < KEY_SLOT_COUNT; i++) {
+        if (s_bank.slot[i].nonceMode > NONCE_MODE_A_LC_STEAL) {
+            s_bank.slot[i].nonceMode = NONCE_MODE_DETERMINISTIC;
+        }
     }
     s_loaded = 1;
 }
@@ -60,6 +71,8 @@ void keystore_clear(uint8_t slot1based)
     ensure_loaded();
     if (slot1based == 0 || slot1based > KEY_SLOT_COUNT) return;
     memset(&s_bank.slot[slot1based - 1], 0, sizeof(KeySlot_t));
+    /* AES patch: cleared slots default to PTT mode (per-PTT nonce). */
+    s_bank.slot[slot1based - 1].nonceMode = NONCE_MODE_A_LC_STEAL;
     keystore_save();
 }
 

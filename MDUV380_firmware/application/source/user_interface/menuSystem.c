@@ -172,6 +172,16 @@ static menuFunctionData_t menuFunctions[] =
 		{ menuKeyEntry,           NULL, NULL, 0 },
 };
 
+
+/* AES patch: enforce that the parallel arrays stay in sync.
+ * If anyone adds an entry to MENU_SCREENS without adding a corresponding
+ * row to menuFunctions[] (and a NULL slot to menuDataGlobal.data[]),
+ * this build-time assertion fires and the build fails loudly instead
+ * of producing a binary that hard-freezes the radio at runtime. */
+_Static_assert((sizeof(menuFunctions) / sizeof(menuFunctions[0])) == NUM_MENU_ENTRIES,
+               "menuFunctions[] and MENU_SCREENS enum are out of sync — "
+               "every MENU_* enum entry must have a matching menuFunctions[] row "
+               "AND a NULL slot in menuDataGlobal.data[]");
 static void menuSystemCheckForFirstEntryAudible(menuStatus_t status)
 {
 	if (nonVolatileSettings.audioPromptMode >= AUDIO_PROMPT_MODE_BEEP)

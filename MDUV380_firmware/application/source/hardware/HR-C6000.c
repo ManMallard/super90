@@ -671,6 +671,9 @@ static void hrc6000HandleLCData(void)
 {
 	uint8_t LCBuf[LC_DATA_LENGTH];
 	bool lcResult = (SPI0ReadPageRegByteArray(0x02, 0x00, LCBuf, LC_DATA_LENGTH) == kStatus_Success); // read the LC from the C6000
+	/* AES patch: Option A — if this is an encrypted-mode-A LC, extract
+	 * the per-PTT nonce and re-init RX. Idempotent. */
+	if (lcResult) { aes_patch_lc_steal_check_and_apply_rx(LCBuf); }
 
 	if (lcResult && hrc6000CrcIsValid() && hrc.ccHold && (hrc.tsAgreed > TS_STABLE_THRESHOLD))
 	{
@@ -1160,9 +1163,13 @@ static inline void hrc6000SysReceivedDataInt(void)
 				}
 
 				SPI1ReadPageRegByteArray(0x03, 0x00, DMR_frame_buffer + LC_DATA_LENGTH, AMBE_AUDIO_LENGTH);
-				/* AES patch: decrypt 27-byte AMBE voice payload right after chip RX */
+				/* AES patch: decrypt 27-byte AMBE voice payload right after chip RX.
+				 * dmr_crypto_rx_should_decrypt_this_call() is the per-call autodetect
+				 * gate for PTT mode: if the most recent LC had no encryption magic
+				 * byte, this returns 0 and we leave the audio plaintext. */
 				if (dmr_crypto_rx_active() && currentChannelData != NULL
-				    && currentChannelData->chMode == RADIO_MODE_DIGITAL)
+				    && currentChannelData->chMode == RADIO_MODE_DIGITAL
+				    && dmr_crypto_rx_should_decrypt_this_call())
 				{
 					static uint32_t rxSuperframeNumber = 0;
 					dmr_crypto_rx_frame(DMR_frame_buffer + LC_DATA_LENGTH, rxSuperframeNumber++);
@@ -1777,6 +1784,8 @@ void hrc6000TimeslotInterruptHandler(void)
 				{
 					if (hrc.txSequence == 0)
 					{
+						/* AES patch: Option A — stuff per-PTT random nonce into LC bytes (hotspot path) */
+						aes_patch_lc_steal_apply_tx((uint8_t*)deferredUpdateBuffer);
 						SPI0WritePageRegByteArray(0x02, 0x00, (uint8_t*)deferredUpdateBuffer, LC_DATA_LENGTH); // put LC into hardware
 					}
 
@@ -2195,6 +2204,9 @@ static void hrc6000SendPcOrTgLCHeader(void)
 	spi_tx[9] = 0x00;
 	spi_tx[10] = 0x00;
 	spi_tx[11] = 0x00;
+	/* AES patch: Option A — stuff per-PTT random nonce into LC bytes
+	 * before the SPI commit. No-op when active slot isn't in mode A. */
+	aes_patch_lc_steal_apply_tx(spi_tx);
 	SPI0WritePageRegByteArray(0x02, 0x00, spi_tx, LC_DATA_LENGTH);
 }
 

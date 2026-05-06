@@ -46,7 +46,7 @@ enum
 
 static const char *creditTexts[] =
 {
-		"" /* AES patch: contributor names removed */
+		"Johnny Bravo" /* AES patch: contributors stripped, custom name added */
 };
 static const int maxCredits = (sizeof(creditTexts) / sizeof(creditTexts[0]));
 static const int maxCreditsPages = (maxCredits / maxDisplayedCreditsLines) + ((maxCredits % maxDisplayedCreditsLines) == 0 ? 0 : 1);

@@ -41,6 +41,7 @@
 #include <string.h>
 
 
+#include "crypto/dmr_crypto.h"
 #if USE_DATASHEET_RANGES
 const frequencyHardwareBand_t RADIO_HARDWARE_FREQUENCY_BANDS[RADIO_BANDS_TOTAL_NUM] =  {
 													{
@@ -788,6 +789,8 @@ void trxActivateTx(bool critical)
 //start of DMR transmission so do a full activation of the transmitter
 void trxActivateDMRTx(void)
 {
+	/* AES patch: engage or tear down encryption based on the channel's encKeyIndex and the slot's populated state. Must run BEFORE the chip starts emitting voice frames so the SPI taps see the right s_txActive. */
+	aes_patch_engage_for_current_channel();
 	trxActivateTx(false);
 	trxIsTransmittingDMR = true;
 }

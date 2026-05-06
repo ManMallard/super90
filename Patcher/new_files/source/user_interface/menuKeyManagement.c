@@ -1,6 +1,7 @@
 /*
  * Encryption Keys top-level menu — lists 16 slots, lets the user
- * open any slot for entry. Each slot displays its label or "<empty>".
+ * open any slot for entry. Each slot displays its label and (for
+ * passphrase-entry slots) the stored asterisk-pattern preview.
  *
  * Uses the standard menuDisplayTitle / menuDisplayEntry pattern so the
  * font size and theming match the rest of the menus.
@@ -66,11 +67,34 @@ static void updateScreen(void)
 
 		char buf[SCREEN_LINE_BUFFER_SIZE];
 		const KeySlot_t *ks = keystore_get((uint8_t)(mNum + 1));
-		if (ks && (ks->flags & KEY_FLAG_SET) && ks->label[0])
+
+		if (ks && (ks->flags & KEY_FLAG_SET))
 		{
-			char lab[KEY_LABEL_LEN + 1] = {0};
-			memcpy(lab, ks->label, KEY_LABEL_LEN);
-			snprintf(buf, sizeof(buf), "%2d: %s", mNum + 1, lab);
+			/* AES patch: nonce mode tag (Det/PTT) appended to the line. */
+			char modeTag[5];
+			switch (ks->nonceMode) {
+				case NONCE_MODE_A_LC_STEAL:     strcpy(modeTag, " PTT"); break;
+				default:                        strcpy(modeTag, " Det"); break;
+			}
+			/* AES patch: passphrase slots show the stored asterisk pattern
+			 * (already in ***X***X form, no transformation needed); hex slots
+			 * fall back to the label. */
+			if (ks->entryMode == KEY_ENTRY_PASSPHRASE && ks->passPreview[0] != 0)
+			{
+				char preview[KEY_PASS_PREVIEW_LEN + 1] = {0};
+				memcpy(preview, ks->passPreview, KEY_PASS_PREVIEW_LEN);
+				snprintf(buf, sizeof(buf), "%2d:%s %s", mNum + 1, modeTag, preview);
+			}
+			else if (ks->label[0] != 0)
+			{
+				char lab[KEY_LABEL_LEN + 1] = {0};
+				memcpy(lab, ks->label, KEY_LABEL_LEN);
+				snprintf(buf, sizeof(buf), "%2d:%s %s", mNum + 1, modeTag, lab);
+			}
+			else
+			{
+				snprintf(buf, sizeof(buf), "%2d:%s <set>", mNum + 1, modeTag);
+			}
 		}
 		else
 		{
@@ -109,5 +133,21 @@ static void handleEvent(uiEvent_t *ev)
 	{
 		keystore_clear((uint8_t)(menuDataGlobal.currentItemIndex + 1));
 		updateScreen();
+	}
+	else if (KEYCHECK_PRESS(ev->keys, KEY_RIGHT) || KEYCHECK_PRESS(ev->keys, KEY_LEFT))
+	{
+		/* AES patch: cycle nonce mode (D <-> A) on populated slots.
+		 * Option B was removed - only DETERMINISTIC and A_LC_STEAL remain. */
+		uint8_t slot = (uint8_t)(menuDataGlobal.currentItemIndex + 1);
+		KeySlot_t *ks = keystore_get_mut(slot);
+		if (ks && (ks->flags & KEY_FLAG_SET)) {
+			if (ks->nonceMode == NONCE_MODE_A_LC_STEAL) {
+				ks->nonceMode = NONCE_MODE_DETERMINISTIC;
+			} else {
+				ks->nonceMode = NONCE_MODE_A_LC_STEAL;
+			}
+			keystore_save();
+			updateScreen();
+		}
 	}
 }
