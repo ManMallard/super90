@@ -12,7 +12,7 @@
 #include "crypto/key_storage.h"
 #include "hardware/EEPROM.h"
 
-#define KS_MAGIC 0x4F4B5935u   /* 'OKY5' — bumped from OKY4 when default new-slot mode changed to PTT */
+#define KS_MAGIC 0x4F4B5934u   /* 'OKY4' — bumped from OKY3 when nonceMode field replaced one reserved byte. NOT bumped for the default-mode change since the byte layout is identical. */
 
 typedef struct {
     uint32_t magic;

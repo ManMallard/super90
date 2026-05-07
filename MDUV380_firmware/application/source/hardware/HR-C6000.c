@@ -1166,13 +1166,13 @@ static inline void hrc6000SysReceivedDataInt(void)
 				/* AES patch: decrypt 27-byte AMBE voice payload right after chip RX.
 				 * dmr_crypto_rx_should_decrypt_this_call() is the per-call autodetect
 				 * gate for PTT mode: if the most recent LC had no encryption magic
-				 * byte, this returns 0 and we leave the audio plaintext. */
+				 * byte, this returns 0 and we leave the audio plaintext.
+				 * Superframe counter is internal to dmr_crypto. */
 				if (dmr_crypto_rx_active() && currentChannelData != NULL
 				    && currentChannelData->chMode == RADIO_MODE_DIGITAL
 				    && dmr_crypto_rx_should_decrypt_this_call())
 				{
-					static uint32_t rxSuperframeNumber = 0;
-					dmr_crypto_rx_frame(DMR_frame_buffer + LC_DATA_LENGTH, rxSuperframeNumber++);
+					dmr_crypto_rx_frame(DMR_frame_buffer + LC_DATA_LENGTH);
 				}
 
 				if (settingsUsbMode == USB_MODE_HOTSPOT)
@@ -1791,13 +1791,11 @@ void hrc6000TimeslotInterruptHandler(void)
 
 					if (hrc.hotspotDMRTxFrameBufferEmpty == false)
 					{
-						/* AES patch: encrypt 27-byte AMBE voice payload before chip TX (hotspot) */
+						/* AES patch: encrypt 27-byte AMBE voice payload before chip TX (hotspot). */
 						if (dmr_crypto_tx_active() && currentChannelData != NULL
 						    && currentChannelData->chMode == RADIO_MODE_DIGITAL)
 						{
-							static uint32_t txSuperframeNumberHS = 0;
-							dmr_crypto_tx_frame((uint8_t *)(deferredUpdateBuffer + LC_DATA_LENGTH),
-							                    txSuperframeNumberHS++);
+							dmr_crypto_tx_frame((uint8_t *)(deferredUpdateBuffer + LC_DATA_LENGTH));
 						}
 						SPI1WritePageRegByteArray(0x03, 0x00, (uint8_t*)(deferredUpdateBuffer + LC_DATA_LENGTH), AMBE_AUDIO_LENGTH); // send the audio bytes to the hardware
 						hrc.hotspotDMRTxFrameBufferEmpty = true; // we have finished with the current frame data from the hotspot
@@ -1821,13 +1819,13 @@ void hrc6000TimeslotInterruptHandler(void)
 
 					if (hrc.ambeBufferCount >= NUM_AMBE_BLOCK_PER_DMR_FRAME)
 					{
-						/* AES patch: encrypt 27-byte AMBE voice payload before chip TX (local) */
+						/* AES patch: encrypt 27-byte AMBE voice payload before chip TX (local).
+						 * Superframe counter is internal to dmr_crypto and resets on each
+						 * dmr_crypto_tx_init(), so PTT mode gets a fresh keystream per push. */
 						if (dmr_crypto_tx_active() && currentChannelData != NULL
 						    && currentChannelData->chMode == RADIO_MODE_DIGITAL)
 						{
-							static uint32_t txSuperframeNumber = 0;
-							dmr_crypto_tx_frame((uint8_t *)hrc.deferredUpdateBufferOutPtr,
-							                    txSuperframeNumber++);
+							dmr_crypto_tx_frame((uint8_t *)hrc.deferredUpdateBufferOutPtr);
 						}
 						SPI1WritePageRegByteArray(0x03, 0x00, (uint8_t*)hrc.deferredUpdateBufferOutPtr, AMBE_AUDIO_LENGTH);// send the audio bytes to the hardware
 						hrc.deferredUpdateBufferOutPtr += AMBE_AUDIO_LENGTH;

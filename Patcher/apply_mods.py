@@ -129,24 +129,22 @@ HRC_HEADER = """\
 """
 
 HRC_TX_LOCAL = """\
-\t\t\t\t\t\t/* AES patch: encrypt 27-byte AMBE voice payload before chip TX (local) */
+\t\t\t\t\t\t/* AES patch: encrypt 27-byte AMBE voice payload before chip TX (local).
+\t\t\t\t\t\t * Superframe counter is internal to dmr_crypto and resets on each
+\t\t\t\t\t\t * dmr_crypto_tx_init(), so PTT mode gets a fresh keystream per push. */
 \t\t\t\t\t\tif (dmr_crypto_tx_active() && currentChannelData != NULL
 \t\t\t\t\t\t    && currentChannelData->chMode == RADIO_MODE_DIGITAL)
 \t\t\t\t\t\t{
-\t\t\t\t\t\t\tstatic uint32_t txSuperframeNumber = 0;
-\t\t\t\t\t\t\tdmr_crypto_tx_frame((uint8_t *)hrc.deferredUpdateBufferOutPtr,
-\t\t\t\t\t\t\t                    txSuperframeNumber++);
+\t\t\t\t\t\t\tdmr_crypto_tx_frame((uint8_t *)hrc.deferredUpdateBufferOutPtr);
 \t\t\t\t\t\t}
 """
 
 HRC_TX_HOTSPOT = """\
-\t\t\t\t\t\t/* AES patch: encrypt 27-byte AMBE voice payload before chip TX (hotspot) */
+\t\t\t\t\t\t/* AES patch: encrypt 27-byte AMBE voice payload before chip TX (hotspot). */
 \t\t\t\t\t\tif (dmr_crypto_tx_active() && currentChannelData != NULL
 \t\t\t\t\t\t    && currentChannelData->chMode == RADIO_MODE_DIGITAL)
 \t\t\t\t\t\t{
-\t\t\t\t\t\t\tstatic uint32_t txSuperframeNumberHS = 0;
-\t\t\t\t\t\t\tdmr_crypto_tx_frame((uint8_t *)(deferredUpdateBuffer + LC_DATA_LENGTH),
-\t\t\t\t\t\t\t                    txSuperframeNumberHS++);
+\t\t\t\t\t\t\tdmr_crypto_tx_frame((uint8_t *)(deferredUpdateBuffer + LC_DATA_LENGTH));
 \t\t\t\t\t\t}
 """
 
@@ -154,13 +152,13 @@ HRC_RX = """\
 \t\t\t\t/* AES patch: decrypt 27-byte AMBE voice payload right after chip RX.
 \t\t\t\t * dmr_crypto_rx_should_decrypt_this_call() is the per-call autodetect
 \t\t\t\t * gate for PTT mode: if the most recent LC had no encryption magic
-\t\t\t\t * byte, this returns 0 and we leave the audio plaintext. */
+\t\t\t\t * byte, this returns 0 and we leave the audio plaintext.
+\t\t\t\t * Superframe counter is internal to dmr_crypto. */
 \t\t\t\tif (dmr_crypto_rx_active() && currentChannelData != NULL
 \t\t\t\t    && currentChannelData->chMode == RADIO_MODE_DIGITAL
 \t\t\t\t    && dmr_crypto_rx_should_decrypt_this_call())
 \t\t\t\t{
-\t\t\t\t\tstatic uint32_t rxSuperframeNumber = 0;
-\t\t\t\t\tdmr_crypto_rx_frame(DMR_frame_buffer + LC_DATA_LENGTH, rxSuperframeNumber++);
+\t\t\t\t\tdmr_crypto_rx_frame(DMR_frame_buffer + LC_DATA_LENGTH);
 \t\t\t\t}
 """
 
@@ -190,11 +188,11 @@ def mod_hrc6000() -> None:
         "SPI1WritePageRegByteArray(0x03, 0x00, "
         "(uint8_t*)hrc.deferredUpdateBufferOutPtr, AMBE_AUDIO_LENGTH)"
     )
-    if "/* AES patch: encrypt 27-byte AMBE voice payload before chip TX (local) */" not in src:
+    if "dmr_crypto_tx_frame((uint8_t *)hrc.deferredUpdateBufferOutPtr" not in src:
         try:
             src = insert_before_once(
                 src, tx_local_anchor, HRC_TX_LOCAL,
-                "/* AES patch: encrypt 27-byte AMBE voice payload before chip TX (local) */",
+                "dmr_crypto_tx_frame((uint8_t *)hrc.deferredUpdateBufferOutPtr",
             )
             changed = True
             print("  HR-C6000.c: TX local tap inserted")
@@ -206,11 +204,11 @@ def mod_hrc6000() -> None:
         "SPI1WritePageRegByteArray(0x03, 0x00, "
         "(uint8_t*)(deferredUpdateBuffer + LC_DATA_LENGTH), AMBE_AUDIO_LENGTH)"
     )
-    if "/* AES patch: encrypt 27-byte AMBE voice payload before chip TX (hotspot) */" not in src:
+    if "dmr_crypto_tx_frame((uint8_t *)(deferredUpdateBuffer + LC_DATA_LENGTH)" not in src:
         try:
             src = insert_before_once(
                 src, tx_hotspot_anchor, HRC_TX_HOTSPOT,
-                "/* AES patch: encrypt 27-byte AMBE voice payload before chip TX (hotspot) */",
+                "dmr_crypto_tx_frame((uint8_t *)(deferredUpdateBuffer + LC_DATA_LENGTH)",
             )
             changed = True
             print("  HR-C6000.c: TX hotspot tap inserted")
@@ -222,11 +220,11 @@ def mod_hrc6000() -> None:
         "SPI1ReadPageRegByteArray(0x03, 0x00, "
         "DMR_frame_buffer + LC_DATA_LENGTH, AMBE_AUDIO_LENGTH)"
     )
-    if "/* AES patch: decrypt 27-byte AMBE voice payload right after chip RX */" not in src:
+    if "dmr_crypto_rx_frame(DMR_frame_buffer + LC_DATA_LENGTH)" not in src:
         try:
             src = insert_once(
                 src, rx_anchor, HRC_RX,
-                "/* AES patch: decrypt 27-byte AMBE voice payload right after chip RX */",
+                "dmr_crypto_rx_frame(DMR_frame_buffer + LC_DATA_LENGTH)",
             )
             changed = True
             print("  HR-C6000.c: RX tap inserted")

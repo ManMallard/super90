@@ -38,6 +38,13 @@ static uint8_t        s_txNonce[8];
 static uint8_t        s_rxNonce[8];
 static uint8_t        s_txActive = 0;
 static uint8_t        s_rxActive = 0;
+/* AES patch: counters owned by dmr_crypto, reset on every _init().
+ * Previously these lived as `static` locals inside the HR-C6000 SPI taps
+ * and never reset, which meant PTT-mode re-init didn't actually restart
+ * the keystream. Hoisting them here makes the counter lifetime match the
+ * crypto context lifetime. */
+static uint32_t       s_txSuperframe = 0;
+static uint32_t       s_rxSuperframe = 0;
 static uint8_t        s_rngReady = 0;
 
 static void rng_init_once(void)
@@ -96,9 +103,10 @@ void dmr_crypto_tx_init(const uint8_t key[32], const uint8_t nonce[8])
     memcpy(s_txNonce, nonce, 8);
     make_iv(iv, s_txNonce, 0);
     AES_init_ctx_iv(&s_txCtx, key, iv);
+    s_txSuperframe = 0;   /* AES patch: reset counter on every PTT/engage */
     s_txActive = 1;
 }
-void dmr_crypto_tx_clear(void) { s_txActive = 0; memset(&s_txCtx, 0, sizeof(s_txCtx)); }
+void dmr_crypto_tx_clear(void) { s_txActive = 0; s_txSuperframe = 0; memset(&s_txCtx, 0, sizeof(s_txCtx)); }
 int  dmr_crypto_tx_active(void) { return s_txActive; }
 
 void dmr_crypto_rx_init(const uint8_t key[32], const uint8_t nonce[8])
@@ -107,26 +115,47 @@ void dmr_crypto_rx_init(const uint8_t key[32], const uint8_t nonce[8])
     memcpy(s_rxNonce, nonce, 8);
     make_iv(iv, s_rxNonce, 0);
     AES_init_ctx_iv(&s_rxCtx, key, iv);
+    s_rxSuperframe = 0;   /* AES patch: reset counter on every call/engage */
     s_rxActive = 1;
 }
-void dmr_crypto_rx_clear(void) { s_rxActive = 0; memset(&s_rxCtx, 0, sizeof(s_rxCtx)); }
+void dmr_crypto_rx_clear(void) { s_rxActive = 0; s_rxSuperframe = 0; memset(&s_rxCtx, 0, sizeof(s_rxCtx)); }
 int  dmr_crypto_rx_active(void) { return s_rxActive; }
 
-void dmr_crypto_tx_frame(uint8_t buf[DMR_AMBE_FRAME_BYTES], uint32_t superframe)
+/* AES patch: superframe counter ceiling. AES-CTR mandates that the
+ * (key, nonce, counter) triple never repeat; once the counter is exhausted
+ * we MUST tear down rather than wrap. At ~17 voice frames/sec this gives
+ * ~7 days of continuous TX/RX before the safety trip, far longer than any
+ * realistic PTT. PTT mode resets the counter per push so the limit is
+ * effectively unreachable; Det mode is the one that benefits from this. */
+#define DMR_CRYPTO_SUPERFRAME_CEILING 10000000u
+
+void dmr_crypto_tx_frame(uint8_t buf[DMR_AMBE_FRAME_BYTES])
 {
     if (!s_txActive) return;
+    if (s_txSuperframe >= DMR_CRYPTO_SUPERFRAME_CEILING) {
+        /* Tear down — caller will see s_txActive == 0 next frame and
+         * the SPI tap will skip encryption (audio plays plaintext). */
+        s_txActive = 0;
+        return;
+    }
     uint8_t iv[AES_BLOCKLEN];
-    make_iv(iv, s_txNonce, superframe);
+    make_iv(iv, s_txNonce, s_txSuperframe);
     memcpy(s_txCtx.Iv, iv, AES_BLOCKLEN);
     AES_CTR_xcrypt_buffer(&s_txCtx, buf, DMR_AMBE_FRAME_BYTES);
+    s_txSuperframe++;
 }
-void dmr_crypto_rx_frame(uint8_t buf[DMR_AMBE_FRAME_BYTES], uint32_t superframe)
+void dmr_crypto_rx_frame(uint8_t buf[DMR_AMBE_FRAME_BYTES])
 {
     if (!s_rxActive) return;
+    if (s_rxSuperframe >= DMR_CRYPTO_SUPERFRAME_CEILING) {
+        s_rxActive = 0;
+        return;
+    }
     uint8_t iv[AES_BLOCKLEN];
-    make_iv(iv, s_rxNonce, superframe);
+    make_iv(iv, s_rxNonce, s_rxSuperframe);
     memcpy(s_rxCtx.Iv, iv, AES_BLOCKLEN);
     AES_CTR_xcrypt_buffer(&s_rxCtx, buf, DMR_AMBE_FRAME_BYTES);
+    s_rxSuperframe++;
 }
 
 /* ---------------------------------------------------------------------------
@@ -308,11 +337,19 @@ int dmr_crypto_rx_should_decrypt_this_call(void)
  * Returns 0 if Option A is not engaged. */
 uint32_t aes_patch_lc_steal_make_tx_nonce(void)
 {
-    if (!s_lastChan || s_lastIdx == 0 || s_lastFlags == 0) {
+    /* AES patch: bail if engage hasn't run, slot index out of range, or
+     * slot is empty (flags has KEY_FLAG_SET cleared). The check covers
+     * both the "engage said empty" path (s_lastFlags == 0) and the
+     * pre-boot initial 0xFF state (s_lastIdx > KEY_SLOT_COUNT). */
+    if (!s_lastChan || s_lastIdx == 0 || s_lastIdx > KEY_SLOT_COUNT
+        || (s_lastFlags & KEY_FLAG_SET) == 0) {
         return 0;
     }
     const KeySlot_t *ks = keystore_get(s_lastIdx);
-    if (!ks || ks->nonceMode != NONCE_MODE_A_LC_STEAL) {
+    if (!ks || (ks->flags & KEY_FLAG_SET) == 0) {
+        return 0;
+    }
+    if (ks->nonceMode != NONCE_MODE_A_LC_STEAL) {
         return 0;
     }
     /* Get 4 fresh random bytes from the hardware RNG. */
@@ -360,12 +397,14 @@ void aes_patch_lc_steal_check_and_apply_rx(const uint8_t *LCBuf)
     /* Default to allowing decrypt; Det-mode and fresh state both want this. */
     s_rxAutodetectAllowDecrypt = 1;
 
-    if (!s_lastChan || s_lastIdx == 0 || s_lastFlags == 0) {
+    /* AES patch: bail if no slot engaged or slot is empty. */
+    if (!s_lastChan || s_lastIdx == 0 || s_lastIdx > KEY_SLOT_COUNT
+        || (s_lastFlags & KEY_FLAG_SET) == 0) {
         s_lastSeenLcValid = 0;
         return;
     }
     const KeySlot_t *ks = keystore_get(s_lastIdx);
-    if (!ks) {
+    if (!ks || (ks->flags & KEY_FLAG_SET) == 0) {
         s_lastSeenLcValid = 0;
         return;
     }

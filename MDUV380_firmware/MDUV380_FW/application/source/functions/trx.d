@@ -86,7 +86,8 @@ application/source/functions/trx.o: ../application/source/functions/trx.c \
  ../application/include/user_interface/uiGlobals.h \
  ../application/include/functions/aprs.h \
  ../application/include/functions/voicePrompts.h \
- ../application/include/user_interface/uiUtilities.h
+ ../application/include/user_interface/uiUtilities.h \
+ ../application/include/crypto/dmr_crypto.h
 ../application/include/functions/calibration.h:
 ../application/include/hardware/SPI_Flash.h:
 ../Middlewares/Third_Party/FreeRTOS/Source/include/FreeRTOS.h:
@@ -177,3 +178,4 @@ application/source/functions/trx.o: ../application/source/functions/trx.c \
 ../application/include/functions/aprs.h:
 ../application/include/functions/voicePrompts.h:
 ../application/include/user_interface/uiUtilities.h:
+../application/include/crypto/dmr_crypto.h:

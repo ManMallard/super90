@@ -2,6 +2,7 @@ application/source/crypto/enc_indicator.o: \
  ../application/source/crypto/enc_indicator.c \
  ../application/include/crypto/enc_indicator.h \
  ../application/include/crypto/key_storage.h \
+ ../application/include/crypto/dmr_crypto.h \
  ../application/include/functions/codeplug.h \
  ../application/include/functions/trx.h \
  ../application/include/functions/sound.h \
@@ -85,6 +86,7 @@ application/source/crypto/enc_indicator.o: \
  ../application/include/hardware/radioHardwareInterface.h
 ../application/include/crypto/enc_indicator.h:
 ../application/include/crypto/key_storage.h:
+../application/include/crypto/dmr_crypto.h:
 ../application/include/functions/codeplug.h:
 ../application/include/functions/trx.h:
 ../application/include/functions/sound.h:
