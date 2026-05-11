@@ -112,7 +112,7 @@ void enc_indicator_render(void)
     /* FONT_SIZE_1 = font_6x8: 3 chars * 6 px wide = 18 px; 8 px tall.
      * x = DISPLAY_SIZE_X - 18 - 2 = right edge with 2 px margin.
      * y = DISPLAY_SIZE_Y - 8 - 1 = bottom edge with 1 px margin. */
-    displayPrintAt(DISPLAY_SIZE_X - 20, DISPLAY_SIZE_Y - 9, "ENC", FONT_SIZE_1);
+    displayPrintAt(DISPLAY_SIZE_X - 20, DISPLAY_SIZE_Y - 9, "ENC", FONT_SIZE_1_BOLD);
     return;
 
 end_no_warn:
