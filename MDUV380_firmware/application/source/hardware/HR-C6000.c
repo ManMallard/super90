@@ -2807,6 +2807,7 @@ void HRC6000SetMicGainFM(uint8_t gain)
 
 void HRC6000SetFMTx(void)
 {
+	SPI0WritePageRegByte(0x04, 0x36, 0x00);											//Disable FM audio feedthrough before any codec reconfiguration
 	SPI0WritePageRegByte(0x04, 0x10, 0x80);											//Switch to FM Mode
 //	SPI0WritePageRegByte(0x04, 0xE2, 0x00);											//configure ADC and DAc
 	SPI0WritePageRegByte(0x04, 0xE0, 0xC9);											//CPU Controls Codec, Line in 1,LineOut2, I2S Slave Mode
