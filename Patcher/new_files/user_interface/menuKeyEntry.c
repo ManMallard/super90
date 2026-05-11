@@ -210,17 +210,17 @@ static menuStatus_t menu_label(uiEvent_t *ev, bool first)
 void menuKeyEntry_passphrase(uint8_t slot1)
 {
     s_slot = slot1; s_mode = MODE_PASS;
-    menuSystemPushNewMenu(/* MENU_KEY_ENTRY_PASS */ menu_pass);
+    menuSystemPushNewMenu(MENU_KEY_ENTRY);
 }
 void menuKeyEntry_hex(uint8_t slot1)
 {
     s_slot = slot1; s_mode = MODE_HEX;
-    menuSystemPushNewMenu(/* MENU_KEY_ENTRY_HEX  */ menu_hex);
+    menuSystemPushNewMenu(MENU_KEY_ENTRY);
 }
 void menuKeyEntry_label(uint8_t slot1)
 {
     s_slot = slot1; s_mode = MODE_LABEL;
-    menuSystemPushNewMenu(/* MENU_KEY_ENTRY_LBL  */ menu_label);
+    menuSystemPushNewMenu(MENU_KEY_ENTRY);
 }
 
 /*

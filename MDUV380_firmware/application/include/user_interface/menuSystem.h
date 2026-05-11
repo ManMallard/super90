@@ -320,6 +320,8 @@ enum MENU_SCREENS
 #if !defined(PLATFORM_GD77S)
 	MENU_APRS,
 #endif
+	MENU_KEY_MANAGEMENT,
+	MENU_KEY_ENTRY,
 	// *** Add new menus to be accessed using quickkey (ID: 0..31) above this line ***
 	UI_MESSAGE_BOX,
 	UI_HOTSPOT_MODE,
@@ -337,8 +339,6 @@ enum MENU_SCREENS
 	MENU_THEME_ITEMS_BROWSER,
 	MENU_COLOUR_PICKER,
 #endif
-	MENU_KEY_MANAGEMENT,
-	MENU_KEY_ENTRY,
 	NUM_MENU_ENTRIES
 };
 
