@@ -1,10 +1,10 @@
 /*
- * Renders the "ENC" badge in the top-right area of the main screens
+ * Renders the "ENC" badge in the bottom-right area of the main screens
  * when the active channel is digital and has a non-zero encKeyIndex.
  *
  * States:
  *   1. Channel encKeyIndex == 0           -> nothing shown
- *   2. encKeyIndex > 0 and slot populated -> "ENC" badge upper-right
+ *   2. encKeyIndex > 0 and slot populated -> "ENC" badge bottom-right
  *   3. encKeyIndex > 0 but slot EMPTY     -> "ENC ACTIVE NO KEY NO ENC"
  *      warning shown ONLY during TX (PTT pressed). The TX taps still see
  *      dmr_crypto_tx_active() == 0 in this state, so audio transmits
@@ -109,8 +109,10 @@ void enc_indicator_render(void)
         s_unencFlashActive = 0;
     }
 
-    /* 16x6 px badge in upper-right area. Y=1 (was 0) for vertical breathing room. */
-    displayPrintAt(108, 1, "ENC", FONT_SIZE_1);
+    /* FONT_SIZE_1 = font_6x8: 3 chars * 6 px wide = 18 px; 8 px tall.
+     * x = DISPLAY_SIZE_X - 18 - 2 = right edge with 2 px margin.
+     * y = DISPLAY_SIZE_Y - 8 - 1 = bottom edge with 1 px margin. */
+    displayPrintAt(DISPLAY_SIZE_X - 20, DISPLAY_SIZE_Y - 9, "ENC", FONT_SIZE_1);
     return;
 
 end_no_warn:

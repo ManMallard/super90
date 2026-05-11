@@ -14,7 +14,7 @@ Baofeng DM-1701 / Retevis RT-84.
   - **64-character hex** (direct 32-byte key)
 - Per-channel encryption-key selector in **Channel details** ("Enc Key" row,
   cycle 0..16 with LEFT/RIGHT keys).
-- "ENC" badge on the main screen when an encrypted channel is active.
+- "ENC" badge in the bottom-right of the main screen when an encrypted channel is active.
 - AES-256-CTR encrypt/decrypt on the 27-byte AMBE+2 voice frames as they
   pass through the HR-C6000 SPI buffer.
 
@@ -119,7 +119,7 @@ After power-on:
    **Green** to commit. The slot now shows label "Slot 1".
 3. **Menu → Channel details** on a digital channel. Scroll to "Enc Key".
    Press **Right** to set it to `1`. **Green** to confirm.
-4. The "ENC" badge should appear in the upper-right of the main screen
+4. The "ENC" badge should appear in the bottom-right of the main screen
    when that channel is active.
 5. Repeat steps 1-3 on a second radio with the same passphrase on slot 1.
 6. Key up on radio A. Radio B should decode voice. Without matching keys,
