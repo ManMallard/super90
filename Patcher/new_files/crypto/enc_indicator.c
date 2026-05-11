@@ -42,7 +42,15 @@ bool enc_indicator_is_active(void)
 void enc_indicator_draw(void)
 {
     if (!enc_indicator_is_active()) return;
-    /* Position: top-right corner of the 128x64 display, FONT_SIZE_1 (~6 px tall).
-     * "ENC" is 3 chars * 6 px = 18 px wide; place at x=108 to leave a 2 px margin. */
-    ucPrintAt(108, 0, "ENC", FONT_SIZE_1);
+    /* FONT_SIZE_1 = font_6x8: "ENC" is 18 px wide, 8 px tall.
+     * Positioned at bottom-right with 2 px right margin and 1 px bottom margin.
+     * Values below are for the MDUV380/MD380 160x120 display (DISPLAY_SIZE_X=160,
+     * DISPLAY_SIZE_Y=120). Adjust if porting to a platform with a different screen. */
+#ifndef DISPLAY_SIZE_X
+#define DISPLAY_SIZE_X 160
+#endif
+#ifndef DISPLAY_SIZE_Y
+#define DISPLAY_SIZE_Y 120
+#endif
+    ucPrintAt(DISPLAY_SIZE_X - 20, DISPLAY_SIZE_Y - 9, "ENC", FONT_SIZE_1);
 }

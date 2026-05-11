@@ -2198,7 +2198,26 @@ void uiUtilityRenderHeader(bool isVFODualWatchScanning, bool isVFOSweepScanning,
 		gmtime_r_Custom(&t, &timeAndDate);
 
 		snprintf(buffer, SCREEN_LINE_BUFFER_SIZE, "%02u%c%02u", timeAndDate.tm_hour, (((timeAndDate.tm_sec % 2) == 0) ? ':' : ' ') ,timeAndDate.tm_min);
-		displayPrintCore(0, DISPLAY_Y_POS_HEADER, buffer, (apoEnabled ? FONT_SIZE_1_BOLD : FONT_SIZE_1), TEXT_ALIGN_RIGHT, false);// Display battery percentage at the right
+		displayPrintCore(0, DISPLAY_Y_POS_HEADER, buffer, (apoEnabled ? FONT_SIZE_1_BOLD : FONT_SIZE_1), TEXT_ALIGN_RIGHT, false);
+
+		/* Draw battery below the time, overlaying the right edge of the RSSI bar. */
+		if (settingsIsOptionBitSet(BIT_BATTERY_VOLTAGE_IN_HEADER))
+		{
+			int16_t xV = (DISPLAY_SIZE_X - ((4 * 6) + 3));
+
+			snprintf(buffer, SCREEN_LINE_BUFFER_SIZE, "%2d", volts);
+			displayPrintCore(xV, DISPLAY_Y_POS_BAR, buffer, (apoEnabled ? FONT_SIZE_1_BOLD : FONT_SIZE_1), TEXT_ALIGN_LEFT, ((batteryIsLow ? scanBlinkPhase : false)));
+
+			displayDrawRect(xV + (6 * 2), DISPLAY_Y_POS_BAR + 5, 2, 2, ((batteryIsLow ? !scanBlinkPhase : true)));
+
+			snprintf(buffer, SCREEN_LINE_BUFFER_SIZE, "%1dV", mvolts);
+			displayPrintCore(xV + (6 * 2) + 3, DISPLAY_Y_POS_BAR, buffer, (apoEnabled ? FONT_SIZE_1_BOLD : FONT_SIZE_1), TEXT_ALIGN_LEFT, ((batteryIsLow ? scanBlinkPhase : false)));
+		}
+		else
+		{
+			snprintf(buffer, SCREEN_LINE_BUFFER_SIZE, "%d%%", batteryPercentage);
+			displayPrintCore(0, DISPLAY_Y_POS_BAR, buffer, (apoEnabled ? FONT_SIZE_1_BOLD : FONT_SIZE_1), TEXT_ALIGN_RIGHT, ((batteryIsLow ? scanBlinkPhase : false)));
+		}
 	}
 	else
 #endif
@@ -2218,7 +2237,7 @@ void uiUtilityRenderHeader(bool isVFODualWatchScanning, bool isVFOSweepScanning,
 		else
 		{
 			snprintf(buffer, SCREEN_LINE_BUFFER_SIZE, "%d%%", batteryPercentage);
-			displayPrintCore(0, DISPLAY_Y_POS_HEADER, buffer, (apoEnabled ? FONT_SIZE_1_BOLD : FONT_SIZE_1), TEXT_ALIGN_RIGHT, ((batteryIsLow ? scanBlinkPhase : false)));// Display battery percentage at the right
+			displayPrintCore(0, DISPLAY_Y_POS_HEADER, buffer, (apoEnabled ? FONT_SIZE_1_BOLD : FONT_SIZE_1), TEXT_ALIGN_RIGHT, ((batteryIsLow ? scanBlinkPhase : false)));
 		}
 	}
 
@@ -2237,12 +2256,19 @@ void uiUtilityRedrawHeaderOnly(bool isVFODualWatchScanning, bool isVFOSweepScann
 #if defined(PLATFORM_RD5R)
 		displayClearRows(0, 1, false);
 #else
-		displayClearRows(0, 2, false);
+		/* Row 2 (y=16..23) covers the bottom of battery-under-time text
+		 * (DISPLAY_Y_POS_BAR=10 + FONT_SIZE_1_HEIGHT=8 → y=18, row 2 ends at y=23).
+		 * Contact display starts at DISPLAY_Y_POS_CONTACT=24 (row 3) — safe to clear. */
+		displayClearRows(0, 3, false);
 #endif
 	}
 
 	uiUtilityRenderHeader(isVFODualWatchScanning, isVFOSweepScanning, forceBatteryDisplay);
+#if defined(PLATFORM_RD5R)
 	displayRenderRows(0, 2);
+#else
+	displayRenderRows(0, 3);
+#endif
 }
 
 static void drawHeaderBar(int *barWidth, int16_t barHeight)
