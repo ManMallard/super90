@@ -302,6 +302,12 @@ void radioSetTx(uint8_t band)
 	//Configure HRC-6000 for transmit
 	if (trxGetMode() == RADIO_MODE_ANALOG)
 	{
+		// Cut the speaker path before reconfiguring the codec so that DAC transients
+		// and any residual FM audio during the RX→TX register sequence cannot reach
+		// the mic (acoustic) or the TX modulator (electrical).
+		HRC6000MuteFmAudio(true);
+		audioAmpDisable(AUDIO_AMP_CHANNEL_RF);
+
 		HRC6000SetFMTx();
 
 		if (currentRadioDevice->currentBandWidthIs25kHz)
