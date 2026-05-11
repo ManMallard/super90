@@ -2206,17 +2206,17 @@ void uiUtilityRenderHeader(bool isVFODualWatchScanning, bool isVFOSweepScanning,
 			int16_t xV = (DISPLAY_SIZE_X - ((4 * 6) + 3));
 
 			snprintf(buffer, SCREEN_LINE_BUFFER_SIZE, "%2d", volts);
-			displayPrintCore(xV, DISPLAY_Y_POS_BAR, buffer, (apoEnabled ? FONT_SIZE_1_BOLD : FONT_SIZE_1), TEXT_ALIGN_LEFT, ((batteryIsLow ? scanBlinkPhase : false)));
+			displayPrintCore(xV, DISPLAY_Y_POS_BAR + 4, buffer, (apoEnabled ? FONT_SIZE_1_BOLD : FONT_SIZE_1), TEXT_ALIGN_LEFT, ((batteryIsLow ? scanBlinkPhase : false)));
 
-			displayDrawRect(xV + (6 * 2), DISPLAY_Y_POS_BAR + 5, 2, 2, ((batteryIsLow ? !scanBlinkPhase : true)));
+			displayDrawRect(xV + (6 * 2), DISPLAY_Y_POS_BAR + 9, 2, 2, ((batteryIsLow ? !scanBlinkPhase : true)));
 
 			snprintf(buffer, SCREEN_LINE_BUFFER_SIZE, "%1dV", mvolts);
-			displayPrintCore(xV + (6 * 2) + 3, DISPLAY_Y_POS_BAR, buffer, (apoEnabled ? FONT_SIZE_1_BOLD : FONT_SIZE_1), TEXT_ALIGN_LEFT, ((batteryIsLow ? scanBlinkPhase : false)));
+			displayPrintCore(xV + (6 * 2) + 3, DISPLAY_Y_POS_BAR + 4, buffer, (apoEnabled ? FONT_SIZE_1_BOLD : FONT_SIZE_1), TEXT_ALIGN_LEFT, ((batteryIsLow ? scanBlinkPhase : false)));
 		}
 		else
 		{
 			snprintf(buffer, SCREEN_LINE_BUFFER_SIZE, "%d%%", batteryPercentage);
-			displayPrintCore(0, DISPLAY_Y_POS_BAR, buffer, (apoEnabled ? FONT_SIZE_1_BOLD : FONT_SIZE_1), TEXT_ALIGN_RIGHT, ((batteryIsLow ? scanBlinkPhase : false)));
+			displayPrintCore(0, DISPLAY_Y_POS_BAR + 4, buffer, (apoEnabled ? FONT_SIZE_1_BOLD : FONT_SIZE_1), TEXT_ALIGN_RIGHT, ((batteryIsLow ? scanBlinkPhase : false)));
 		}
 	}
 	else

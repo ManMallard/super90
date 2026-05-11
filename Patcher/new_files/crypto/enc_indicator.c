@@ -29,6 +29,9 @@ extern void ucPrintAt(int x, int y, const char *text, int font);
 #ifndef FONT_SIZE_1
 #define FONT_SIZE_1 0
 #endif
+#ifndef FONT_SIZE_1_BOLD
+#define FONT_SIZE_1_BOLD 1
+#endif
 
 bool enc_indicator_is_active(void)
 {
@@ -52,5 +55,5 @@ void enc_indicator_draw(void)
 #ifndef DISPLAY_SIZE_Y
 #define DISPLAY_SIZE_Y 120
 #endif
-    ucPrintAt(DISPLAY_SIZE_X - 20, DISPLAY_SIZE_Y - 9, "ENC", FONT_SIZE_1);
+    ucPrintAt(DISPLAY_SIZE_X - 20, DISPLAY_SIZE_Y - 9, "ENC", FONT_SIZE_1_BOLD);
 }
