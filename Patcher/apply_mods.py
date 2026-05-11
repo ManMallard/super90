@@ -247,9 +247,10 @@ def mod_menuSystem_h() -> None:
     src = read(p)
     changed = False
 
-    # Add enum entries before NUM_MENU_ENTRIES
+    # Add enum entries just before the quickkey barrier comment so they get
+    # IDs ≤ 31 and are reachable via QUICKKEY_MENUID (5-bit field).
     if "MENU_KEY_MANAGEMENT" not in src:
-        anchor = "NUM_MENU_ENTRIES"
+        anchor = "// *** Add new menus to be accessed using quickkey (ID: 0..31) above this line ***"
         try:
             src = insert_before_once(
                 src, anchor,
@@ -257,9 +258,9 @@ def mod_menuSystem_h() -> None:
                 "MENU_KEY_MANAGEMENT",
             )
             changed = True
-            print("  menuSystem.h: added MENU_KEY_MANAGEMENT and MENU_KEY_ENTRY")
+            print("  menuSystem.h: added MENU_KEY_MANAGEMENT and MENU_KEY_ENTRY (above quickkey barrier)")
         except LookupError:
-            todo("menuSystem.h: could not find NUM_MENU_ENTRIES - add MENU_KEY_MANAGEMENT and MENU_KEY_ENTRY to MENU_SCREENS enum manually")
+            todo("menuSystem.h: could not find quickkey barrier comment - add MENU_KEY_MANAGEMENT and MENU_KEY_ENTRY before UI_MESSAGE_BOX in MENU_SCREENS enum manually (they must have enum values ≤ 31)")
 
     # Add prototypes
     if "menuKeyManagement(" not in src:
@@ -299,42 +300,25 @@ def mod_menuSystem_c() -> None:
     src = read(p)
     changed = False
 
-    # ---- 4a. menuFunctions[] — append two entries at the end ----
+    # ---- 4a. menuFunctions[] — insert two entries BEFORE the quickkey barrier ----
+    # The barrier comment separates quickkey-accessible (ID 0..31) from internal menus.
+    # MENU_KEY_MANAGEMENT must be above it so QUICKKEY_MENUID (5-bit) can reach it.
     if "{ menuKeyManagement," not in src:
-        # Find the closing brace of menuFunctions[] array.
-        m = re.search(
-            r"static\s+menuFunctionData_t\s+menuFunctions\s*\[\s*\]\s*=\s*\{",
-            src,
-        )
-        if not m:
-            todo("menuSystem.c: could not locate menuFunctions[] array")
-        else:
-            # Walk forward to find the matching closing brace.
-            depth = 1
-            i = m.end()
-            while i < len(src) and depth > 0:
-                if src[i] == "{":
-                    depth += 1
-                elif src[i] == "}":
-                    depth -= 1
-                    if depth == 0:
-                        break
-                i += 1
-            if depth != 0:
-                todo("menuSystem.c: brace match failed in menuFunctions[]")
-            else:
-                # Look back to before the closing brace and insert before it.
-                # Find the last existing entry's line — preserve trailing comma.
-                close = i
-                # Find start of line containing the close brace
-                line_start = src.rfind("\n", 0, close) + 1
-                payload = (
+        barrier = "// *** Add new menus to be accessed using quickkey (ID: 0..31) above this line ***"
+        if barrier in src:
+            try:
+                src = insert_before_once(
+                    src, barrier,
                     "\t\t{ menuKeyManagement,      NULL, NULL, 0 },\n"
-                    "\t\t{ menuKeyEntry,           NULL, NULL, 0 },\n"
+                    "\t\t{ menuKeyEntry,           NULL, NULL, 0 },\n",
+                    "{ menuKeyManagement,",
                 )
-                src = src[:line_start] + payload + src[line_start:]
                 changed = True
-                print("  menuSystem.c: appended menuKeyManagement and menuKeyEntry to menuFunctions[]")
+                print("  menuSystem.c: inserted menuKeyManagement and menuKeyEntry above quickkey barrier in menuFunctions[]")
+            except LookupError:
+                todo("menuSystem.c: could not insert before quickkey barrier in menuFunctions[] - add menuKeyManagement and menuKeyEntry rows before the '*** Add new menus ***' comment manually")
+        else:
+            todo("menuSystem.c: quickkey barrier comment not found in menuFunctions[] - add menuKeyManagement and menuKeyEntry entries with menu IDs ≤ 31 manually")
 
     # ---- 4b. mainMenuItems[] — insert before its closing brace ----
     if "MENU_KEY_MANAGEMENT" not in src:
@@ -381,36 +365,26 @@ def mod_menuSystem_c_data() -> None:
     src = read(p)
     if "// Encryption Keys (AES patch)" in src:
         return
-    # The .data initializer is part of `menuDataGlobal_t menuDataGlobal = { ... }`
-    # Find the `.data ` field, then find its `{` and brace-match to its `}`.
-    m = re.search(r"\.data\s*=\s*\{", src)
-    if not m:
-        todo("menuSystem.c: could not find menuDataGlobal.data[] initializer - "
-             "add `NULL,// Encryption Keys (AES patch)` and `NULL,// Encryption Key Entry (AES patch)` "
-             "at the end of the .data = { ... } block in menuDataGlobal manually")
-        return
-    depth = 1
-    i = m.end()
-    while i < len(src) and depth > 0:
-        if src[i] == "{":
-            depth += 1
-        elif src[i] == "}":
-            depth -= 1
-            if depth == 0:
-                break
-        i += 1
-    if depth != 0:
-        todo("menuSystem.c: brace match failed in .data initializer")
-        return
-    close_idx = i
-    line_start = src.rfind("\n", 0, close_idx) + 1
-    payload = (
-        "\t\t\tNULL,// Encryption Keys (AES patch)\n"
-        "\t\t\tNULL,// Encryption Key Entry (AES patch)\n"
-    )
-    src = src[:line_start] + payload + src[line_start:]
-    write(p, src)
-    print("  menuSystem.c: appended NULL entries to menuDataGlobal.data[]")
+    # Insert the two NULL slots BEFORE the quickkey barrier comment inside .data[].
+    # This keeps them in sync with the enum entries that were also inserted above
+    # the barrier — the parallel arrays must have identical ordering.
+    barrier = "// *** Add new menus to be accessed using quickkey (ID: 0..31) above this line ***"
+    if barrier in src:
+        try:
+            payload = (
+                "\t\t\tNULL,// Encryption Keys (AES patch)\n"
+                "\t\t\tNULL,// Encryption Key Entry (AES patch)\n"
+            )
+            src = insert_before_once(src, barrier, payload, "// Encryption Keys (AES patch)")
+            write(p, src)
+            print("  menuSystem.c: inserted NULL entries above quickkey barrier in menuDataGlobal.data[]")
+        except LookupError:
+            todo("menuSystem.c: could not insert before quickkey barrier in .data[] - "
+                 "add NULL,// Encryption Keys (AES patch) and NULL,// Encryption Key Entry (AES patch) "
+                 "before the '*** Add new menus ***' comment in menuDataGlobal.data[] manually")
+    else:
+        todo("menuSystem.c: quickkey barrier comment not found in .data[] - "
+             "add the two NULL slots before the MessageBox entry to keep ordering in sync with the enum")
 
 
 # ---------------------------------------------------------------------------

@@ -91,6 +91,8 @@ menuDataGlobal_t menuDataGlobal =
 #if !defined(PLATFORM_GD77S)
 				NULL,// APRS options
 #endif
+			NULL,// Encryption Keys (AES patch)
+			NULL,// Encryption Key Entry (AES patch)
 				// *** Add new menus to be accessed using quickkey (ID: 0..31) above this line ***
 				NULL,// MessageBox
 				NULL,// hotspot mode
@@ -108,8 +110,6 @@ menuDataGlobal_t menuDataGlobal =
 				NULL,// Theme items browser
 				NULL,// Colour picker
 #endif
-			NULL,// Encryption Keys (AES patch)
-			NULL,// Encryption Key Entry (AES patch)
 		}
 };
 
@@ -151,6 +151,8 @@ static menuFunctionData_t menuFunctions[] =
 #if !defined(PLATFORM_GD77S)
 		{ menuAPRSOptions,          NULL, NULL, 0 },
 #endif
+		{ menuKeyManagement,      NULL, NULL, 0 },
+		{ menuKeyEntry,           NULL, NULL, 0 },
 		// *** Add new menus to be accessed using quickkey (ID: 0..31) above this line ***
 		{ uiMessageBox,             NULL, NULL, 0 },
 		{ menuHotspotMode,          NULL, NULL, 0 },
@@ -168,8 +170,6 @@ static menuFunctionData_t menuFunctions[] =
 		{ menuThemeItemsBrowser,    NULL, NULL, 0 },
 		{ menuColourPicker,         NULL, NULL, 0 },
 #endif
-		{ menuKeyManagement,      NULL, NULL, 0 },
-		{ menuKeyEntry,           NULL, NULL, 0 },
 };
 
 
