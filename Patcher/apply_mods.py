@@ -1058,6 +1058,60 @@ def verify_new_files() -> None:
             todo(f"missing {f.relative_to(REPO)} — copy from new_files/ via setup.ps1")
 
 
+# ---------------------------------------------------------------------------
+def mod_codeplug_quickkey_sanitize() -> None:
+    """Sanitize factory-erased (0xFFFF) quickkey EEPROM slots at boot.
+
+    On a factory-fresh radio all quickkey EEPROM bytes are 0xFF, making every
+    slot read as 0xFFFF.  quickkeyIsEmpty() treats 0xFFFF as occupied (bit 15
+    set, != 0x8000), so the user can never assign a quickkey without first doing
+    a manual clear.  Worse, QUICKKEY_MENUID(0xFFFF) == 31 == MENU_NUMERICAL_ENTRY
+    on the MDUV380 build (HAS_GPS + HAS_COLOURS), causing SK2+digit to open
+    "Enter TG" / "Enter DTMF" instead of the assigned menu.
+
+    Fix: rewrite any 0xFFFF slot to the canonical-empty marker 0x8000 during
+    the cache-init pass so the problem is repaired on first boot.
+    """
+    p = SRC / "functions" / "codeplug.c"
+    src = p.read_text(encoding="utf-8")
+    sentinel = "AES patch: sanitize factory-erased slots"
+    if sentinel in src:
+        print(f"  [skip] {p.relative_to(REPO)} — quickkey-sanitize already applied")
+        return
+
+    old = (
+        "static void codeplugQuickKeyInitCache(void)\n"
+        "{\n"
+        "\tEEPROM_Read(CODEPLUG_ADDR_QUICKKEYS, (uint8_t *)&quickKeysCache, "
+        "(CODEPLUG_QUICKKEYS_SIZE * sizeof(uint16_t)));\n"
+        "}"
+    )
+    new = (
+        "static void codeplugQuickKeyInitCache(void)\n"
+        "{\n"
+        "\tEEPROM_Read(CODEPLUG_ADDR_QUICKKEYS, (uint8_t *)&quickKeysCache, "
+        "(CODEPLUG_QUICKKEYS_SIZE * sizeof(uint16_t)));\n"
+        "\t// AES patch: sanitize factory-erased slots (0xFFFF) so they behave as empty\n"
+        "\t// (0x8000) rather than decoding to MENU_NUMERICAL_ENTRY and blocking assignment.\n"
+        "\tfor (int i = 0; i < CODEPLUG_QUICKKEYS_SIZE; i++)\n"
+        "\t{\n"
+        "\t\tif (quickKeysCache[i] == 0xFFFF)\n"
+        "\t\t{\n"
+        "\t\t\tquickKeysCache[i] = 0x8000;\n"
+        "\t\t\tuint16_t empty = 0x8000;\n"
+        "\t\t\tEEPROM_Write(CODEPLUG_ADDR_QUICKKEYS + (sizeof(uint16_t) * i), "
+        "(uint8_t *)&empty, sizeof(uint16_t));\n"
+        "\t\t}\n"
+        "\t}\n"
+        "}"
+    )
+    if old not in src:
+        todo(f"mod_codeplug_quickkey_sanitize: anchor not found in {p.relative_to(REPO)}")
+        return
+    p.write_text(src.replace(old, new, 1), encoding="utf-8")
+    print(f"  [ok]   {p.relative_to(REPO)} — quickkey EEPROM sanitize added")
+
+
 def main() -> int:
     global REPO, APP, SRC, INC, TODO_PATH
     if len(sys.argv) != 2:
@@ -1094,6 +1148,7 @@ def main() -> int:
     mod_radioInfos_gps_check()
     mod_firmware_info_strip_names()
     mod_lang_enc_keys()
+    mod_codeplug_quickkey_sanitize()
 
     write_todo()
     if todo_lines:
