@@ -2002,26 +2002,37 @@ void uiUtilityRenderHeader(bool isVFODualWatchScanning, bool isVFOSweepScanning,
 			{
 				bool cssTextInverted = (trxGetAnalogFilterLevel() == ANALOG_FILTER_NONE);
 
-				if (currentChannelData->txTone != CODEPLUG_CSS_TONE_NONE)
-				{
-					strcpy(buffer, ((codeplugGetCSSType(currentChannelData->txTone) & CSS_TYPE_DCS) ? "DT" : "CT"));
-				}
-				else // tx and/or rx tones are enabled, no need to check for this
-				{
-					strcpy(buffer, ((codeplugGetCSSType(currentChannelData->rxTone) & CSS_TYPE_DCS) ? "D" : "C"));
-				}
+				bool hasTX = (currentChannelData->txTone != CODEPLUG_CSS_TONE_NONE);
+				bool hasRX = (currentChannelData->rxTone != CODEPLUG_CSS_TONE_NONE);
 
-				// There is no room to display if rxTone is CTCSS or DCS, when txTone is set.
-				if (currentChannelData->rxTone != CODEPLUG_CSS_TONE_NONE)
+				if (hasTX && hasRX)
 				{
-					strcat(buffer, "R");
+					bool txIsDCS = (codeplugGetCSSType(currentChannelData->txTone) & CSS_TYPE_DCS) != 0;
+					bool rxIsDCS = (codeplugGetCSSType(currentChannelData->rxTone) & CSS_TYPE_DCS) != 0;
+					if (txIsDCS != rxIsDCS)
+					{
+						strcpy(buffer, txIsDCS ? "DT" : "CT");
+						strcat(buffer, rxIsDCS ? "DR" : "CR");
+					}
+					else
+					{
+						strcpy(buffer, txIsDCS ? "DT" : "CT");
+						strcat(buffer, "R");
+					}
+				}
+				else if (hasTX)
+				{
+					strcpy(buffer, (codeplugGetCSSType(currentChannelData->txTone) & CSS_TYPE_DCS) ? "DT" : "CT");
+				}
+				else
+				{
+					strcpy(buffer, (codeplugGetCSSType(currentChannelData->rxTone) & CSS_TYPE_DCS) ? "DR" : "CR");
 				}
 
 				int16_t cssPixLen = (strlen(buffer) * 6);
 				int16_t cssXPos = ((FILTER_TEXT_X_CENTER + (itemOffset * 1)) - (cssPixLen >> 1));
 				if (cssTextInverted)
 				{
-					// Inverted rectangle width is fixed size, large enough to fit 3 characters
 					displayFillRect((cssXPos - 1), DISPLAY_Y_POS_HEADER - 1, (cssPixLen + 1), 9, false);
 				}
 
