@@ -1521,6 +1521,17 @@ bool codeplugGetDeviceInfo(CodeplugDeviceInfo_t *deviceInfoBuffer)
 static void codeplugQuickKeyInitCache(void)
 {
 	EEPROM_Read(CODEPLUG_ADDR_QUICKKEYS, (uint8_t *)&quickKeysCache, (CODEPLUG_QUICKKEYS_SIZE * sizeof(uint16_t)));
+	// AES patch: sanitize factory-erased slots (0xFFFF) so they behave as empty
+	// (0x8000) rather than decoding to MENU_NUMERICAL_ENTRY and blocking assignment.
+	for (int i = 0; i < CODEPLUG_QUICKKEYS_SIZE; i++)
+	{
+		if (quickKeysCache[i] == 0xFFFF)
+		{
+			quickKeysCache[i] = 0x8000;
+			uint16_t empty = 0x8000;
+			EEPROM_Write(CODEPLUG_ADDR_QUICKKEYS + (sizeof(uint16_t) * i), (uint8_t *)&empty, sizeof(uint16_t));
+		}
+	}
 }
 
 uint16_t codeplugGetQuickkeyFunctionID(char key)
