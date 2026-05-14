@@ -34,6 +34,80 @@
 #include "functions/voicePrompts.h"
 #include "functions/rxPowerSaving.h"
 #include "interfaces/interrupts.h"
+#include "functions/trx.h"
+#include "functions/m17_modem.h"
+#include "dmr_codec/codec2.h"
+
+/* ── M17 engine (single instance, lives in SRAM) ──────────────────── */
+static M17ModemCtx_t s_m17Ctx;
+static Codec2State_t s_codec2Enc;
+static Codec2State_t s_codec2Dec;
+static bool          s_m17Inited = false;
+
+/* Outgoing M17 stream state */
+static M17Lsf_t      s_m17TxLsf;
+static uint8_t       s_m17TxLsfEncoded[M17_LSF_ENCODED_BITS];
+static uint16_t      s_m17TxFrameNumber = 0;
+static int8_t        s_m17TxLichChunk   = 0;
+
+/* Codec2 encoder ping-pong: collect 2 × 160-sample frames → 1 M17 payload */
+static int16_t       s_c2EncBuf[M17_C2_FRAMES_PER_M17][CODEC2_PCM_SAMPLES];
+static int           s_c2EncBufIdx = 0;   /* 0 or 1 */
+
+static void m17EnsureInited(void)
+{
+    if (!s_m17Inited)
+    {
+        m17ModemInit(&s_m17Ctx);
+        codec2Init(&s_codec2Enc);
+        codec2Init(&s_codec2Dec);
+        s_m17Inited = true;
+    }
+}
+
+/* Build and queue a preamble + LSF burst at TX start */
+static void m17StartTx(void)
+{
+    m17EnsureInited();
+    m17ModemInit(&s_m17Ctx);
+    s_m17TxFrameNumber = 0;
+    s_m17TxLichChunk   = 0;
+
+    /* Fill LSF from settings */
+    char myCall[10] = "N0CALL";   /* TODO: read from nonVolatileSettings */
+    m17CallsignEncode(myCall, s_m17TxLsf.src);
+    memset(s_m17TxLsf.dst, 0xFF, 6);  /* broadcast */
+    s_m17TxLsf.type = M17_TYPE_DEFAULT;
+    memset(s_m17TxLsf.meta, 0, 14);
+
+    /* Encode LSF */
+    m17LsfEncode(&s_m17TxLsf, s_m17TxLsfEncoded);
+
+    /* Queue preamble */
+    int8_t preamble[M17_PREAMBLE_SYMBOLS];
+    m17PreambleFill(preamble);
+    m17ModemTxLoad(&s_m17Ctx, preamble);
+
+    /* Queue LSF burst (sync + encoded payload) */
+    int8_t lsfFrame[M17_SYMBOLS_PER_FRAME];
+    int8_t syncSym[M17_SYNC_SYMBOLS];
+    uint8_t syncBits[16];
+    uint16_t sw = M17_SYNC_LSF;
+    for (int i = 15; i >= 0; i--) syncBits[15 - i] = (uint8_t)((sw >> i) & 1);
+    for (int i = 0; i < 8; i++)
+    {
+        uint8_t d = (uint8_t)((syncBits[2*i] << 1) | syncBits[2*i+1]);
+        lsfFrame[i] = m17DibitToSymbol(d);
+    }
+    /* Convert 368 encoded LSF bits to 184 symbols */
+    for (int i = 0; i < M17_LSF_PAYLOAD_SYMBOLS; i++)
+    {
+        uint8_t d = (uint8_t)((s_m17TxLsfEncoded[2*i] << 1) | s_m17TxLsfEncoded[2*i+1]);
+        lsfFrame[8 + i] = m17DibitToSymbol(d);
+    }
+    m17ModemTxLoad(&s_m17Ctx, lsfFrame);
+    (void)syncSym;
+}
 
 
 #define MIC_AVERAGE_COUNTER_RELOAD     10
@@ -328,6 +402,21 @@ bool soundFillData(void)
 
 bool soundRefillData(uint32_t bufNum)
 {
+	/* ── M17 TX path ─────────────────────────────────────────────── */
+	if (trxGetMode() == RADIO_MODE_M17 && trxTransmissionEnabled)
+	{
+		m17EnsureInited();
+		/* Fill both stereo sub-buffers with modem output */
+		for (int j = 0; j < 2; j++)
+		{
+			int16_t mono[WAV_BUFFER_SIZE / 2];
+			m17ModemTxFill(&s_m17Ctx, mono, WAV_BUFFER_SIZE / 2);
+			for (int i = 0; i < WAV_BUFFER_SIZE / 2; i++)
+				i2s_Tx_Buffer[bufNum][j][2 * i] = (uint16_t)mono[i];
+		}
+		return !m17ModemTxDone(&s_m17Ctx);
+	}
+
 	uint32_t samp;
 
 	if (wavbuffer_count >= 2)
@@ -435,6 +524,87 @@ bool soundReceiveData(void)
 
 void soundReceiveRefillData(uint32_t bufNum)
 {
+	/* ── M17 RX path ─────────────────────────────────────────────── */
+	if (trxGetMode() == RADIO_MODE_M17)
+	{
+		m17EnsureInited();
+		/* Collect samples from both stereo sub-buffers (left channel only) */
+		int16_t rxSlice[WAV_BUFFER_SIZE];
+		int nSamples = 0;
+		for (int j = 0; j < 2; j++)
+			for (int i = 0; i < (WAV_BUFFER_SIZE / 2); i++)
+				rxSlice[nSamples++] = (int16_t)i2s_Rx_Buffer[bufNum][j][i * 2];
+
+		M17StreamFrame_t frame;
+		M17Lsf_t lsf;
+		if (m17ModemRxFeed(&s_m17Ctx, rxSlice, nSamples, &frame, &lsf))
+		{
+			/* Decode two Codec2 frames from the 16-byte payload */
+			for (int cf = 0; cf < M17_C2_FRAMES_PER_M17; cf++)
+			{
+				int16_t pcm[CODEC2_PCM_SAMPLES];
+				codec2Decode(&s_codec2Dec,
+				             frame.payload + cf * M17_C2_FRAME_BYTES,
+				             pcm);
+				/* Write decoded PCM into the wavbuffer for I2S playback */
+				if (wavbuffer_count <= (WAV_BUFFER_COUNT - 2))
+				{
+					for (int i = 0; i < CODEC2_PCM_SAMPLES; i++)
+					{
+						swapper.byte16 = pcm[i];
+						audioAndHotspotDataBuffer.wavbuffer[wavbuffer_write_idx][2 * i]     = swapper.bytes8[0];
+						audioAndHotspotDataBuffer.wavbuffer[wavbuffer_write_idx][2 * i + 1] = swapper.bytes8[1];
+					}
+					wavbuffer_write_idx = ((wavbuffer_write_idx + 1) % WAV_BUFFER_COUNT);
+					wavbuffer_count++;
+				}
+			}
+		}
+		return;
+	}
+
+	/* ── M17 TX mic capture ─────────────────────────────────────────
+	   During M17 TX the I2S RX carries microphone audio.  Collect it,
+	   run Codec2, and when we have 2 frames assemble a stream frame. */
+	if (trxGetMode() == RADIO_MODE_M17 && trxTransmissionEnabled)
+	{
+		int16_t mic[WAV_BUFFER_SIZE / 2];
+		for (int i = 0; i < (WAV_BUFFER_SIZE / 2); i++)
+			mic[i] = (int16_t)i2s_Rx_Buffer[bufNum][0][i * 2];
+
+		memcpy(s_c2EncBuf[s_c2EncBufIdx], mic, CODEC2_PCM_SAMPLES * sizeof(int16_t));
+		s_c2EncBufIdx++;
+
+		if (s_c2EncBufIdx >= M17_C2_FRAMES_PER_M17)
+		{
+			s_c2EncBufIdx = 0;
+			M17StreamFrame_t frame;
+			memset(&frame, 0, sizeof(frame));
+			frame.fn = s_m17TxFrameNumber++;
+			for (int cf = 0; cf < M17_C2_FRAMES_PER_M17; cf++)
+				codec2Encode(&s_codec2Enc, s_c2EncBuf[cf],
+				             frame.payload + cf * M17_C2_FRAME_BYTES);
+
+			/* Build LICH chunk */
+			uint8_t rawLsf[M17_LSF_SIZE];
+			memcpy(rawLsf,      s_m17TxLsf.dst,  6);
+			memcpy(rawLsf + 6,  s_m17TxLsf.src,  6);
+			rawLsf[12] = (uint8_t)(s_m17TxLsf.type >> 8);
+			rawLsf[13] = (uint8_t)(s_m17TxLsf.type & 0xFF);
+			memcpy(rawLsf + 14, s_m17TxLsf.meta, 14);
+			rawLsf[28] = (uint8_t)(s_m17TxLsf.crc >> 8);
+			rawLsf[29] = (uint8_t)(s_m17TxLsf.crc & 0xFF);
+			m17LichBuildChunk(rawLsf, (uint8_t)(s_m17TxLichChunk % M17_LICH_CHUNKS),
+			                  frame.lich);
+			s_m17TxLichChunk++;
+
+			M17PhysFrame_t phys;
+			m17StreamFrameEncode(&frame, &phys);
+			m17ModemTxLoad(&s_m17Ctx, phys.symbols);
+		}
+		return;
+	}
+
 	if (wavbuffer_count <= (WAV_BUFFER_COUNT - 2))
 	{
 		for(int j = 0; j < 2; j++)
@@ -464,6 +634,18 @@ void soundReceiveRefillData(uint32_t bufNum)
 	}
 }
 
+
+void m17SoundStartTx(void)
+{
+	m17StartTx();
+}
+
+void m17SoundStartRx(void)
+{
+	m17EnsureInited();
+	m17ModemRxReset(&s_m17Ctx);
+	s_c2EncBufIdx = 0;
+}
 
 void soundTickRXBuffer(void)
 {

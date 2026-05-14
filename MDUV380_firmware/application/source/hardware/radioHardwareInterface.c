@@ -180,15 +180,21 @@ void radioSetBandwidth(bool Is25K)
 
 void radioSetMode(int mode) // Called withing trx.c: in task critical sections
 {
-	if (mode == RADIO_MODE_ANALOG)
+	if (mode == RADIO_MODE_ANALOG || mode == RADIO_MODE_M17)
 	{
+		/* M17 uses the FM audio path through the HR-C6000, identical to
+		   analog FM receive mode.  The software modem reads/writes the
+		   I2S audio stream directly; the HR-C6000 acts as a transparent
+		   FM discriminator (RX) and FM modulator driver (TX). */
 		HRC6000SetFMRx();
 	}
 	else
 	{
 		HRC6000SetDMR();
 	}
-	AT1846sSetMode(mode);
+	/* Pass RADIO_MODE_ANALOG to AT1846S for both analog FM and M17,
+	   since both use the same narrow-band FM IF path. */
+	AT1846sSetMode((mode == RADIO_MODE_M17) ? RADIO_MODE_ANALOG : mode);
 }
 
 void radioReadVoxAndMicStrength(void)
