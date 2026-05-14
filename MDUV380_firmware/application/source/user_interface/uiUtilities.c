@@ -2107,6 +2107,26 @@ void uiUtilityRenderHeader(bool isVFODualWatchScanning, bool isVFOSweepScanning,
 				}
 			}
 			break;
+
+		case RADIO_MODE_M17:
+			if (isVFOSweepScanning == false)
+			{
+				bool isInverted = (scanIsActive ? scanBlinkPhase : false);
+
+				if (uiDataGlobal.talkaround)
+				{
+					isInverted = true;
+					displayFillRect(1, 1, (3 * 6), 8 + 1, false);
+				}
+
+				displayPrintCore(MODE_TEXT_X_OFFSET, DISPLAY_Y_POS_HEADER, (isVFODualWatchScanning ? "[DW]" : "M17"), FONT_SIZE_1, TEXT_ALIGN_LEFT, isInverted);
+
+				if (audioIsMuted)
+				{
+					displayDrawFastHLine(MODE_TEXT_X_OFFSET, (DISPLAY_Y_POS_HEADER + (FONT_SIZE_1_HEIGHT >> 1)), (6 * (isVFODualWatchScanning ? 4 : 3)), !isInverted);
+				}
+			}
+			break;
 	}
 
 	// APRS flag

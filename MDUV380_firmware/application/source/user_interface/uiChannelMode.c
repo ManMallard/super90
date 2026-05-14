@@ -1603,14 +1603,6 @@ static void handleEvent(uiEvent_t *ev)
 					uiDataGlobal.VoicePrompts.inhibitInitial = false;
 					menuChannelExitStatus |= MENU_STATUS_FORCE_FIRST;
 				}
-				else if (currentChannelData->digitalMode == CHANNEL_DIGITAL_MODE_M17)
-				{
-					currentChannelData->digitalMode = CHANNEL_DIGITAL_MODE_P25;
-					uiDataGlobal.VoicePrompts.inhibitInitial = true;
-					uiChannelModeLoadChannelData(true, false);
-					uiDataGlobal.VoicePrompts.inhibitInitial = false;
-					menuChannelExitStatus |= MENU_STATUS_FORCE_FIRST;
-				}
 				else
 				{
 					currentChannelData->chMode = RADIO_MODE_ANALOG;

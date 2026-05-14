@@ -369,7 +369,6 @@ static void updateScreen(bool isFirstRun, bool allowedToSpeakUpdate)
 							switch ((ChannelDigitalMode_t)tmpChannel.digitalMode)
 							{
 								case CHANNEL_DIGITAL_MODE_M17: strcpy(rightSideVar, "M17"); break;
-								case CHANNEL_DIGITAL_MODE_P25: strcpy(rightSideVar, "P25"); break;
 								default:                        strcpy(rightSideVar, "DMR"); break;
 							}
 						}
@@ -1226,11 +1225,7 @@ static void handleEvent(uiEvent_t *ev)
 				case CH_DETAILS_MODE:
 					if (tmpChannel.chMode == RADIO_MODE_DIGITAL)
 					{
-						if (tmpChannel.digitalMode == CHANNEL_DIGITAL_MODE_P25)
-						{
-							tmpChannel.digitalMode = CHANNEL_DIGITAL_MODE_M17;
-						}
-						else if (tmpChannel.digitalMode == CHANNEL_DIGITAL_MODE_M17)
+						if (tmpChannel.digitalMode == CHANNEL_DIGITAL_MODE_M17)
 						{
 							tmpChannel.digitalMode = CHANNEL_DIGITAL_MODE_DMR;
 						}
@@ -1485,10 +1480,6 @@ static void handleEvent(uiEvent_t *ev)
 						if (tmpChannel.digitalMode == CHANNEL_DIGITAL_MODE_DMR)
 						{
 							tmpChannel.digitalMode = CHANNEL_DIGITAL_MODE_M17;
-						}
-						else if (tmpChannel.digitalMode == CHANNEL_DIGITAL_MODE_M17)
-						{
-							tmpChannel.digitalMode = CHANNEL_DIGITAL_MODE_P25;
 						}
 					}
 					break;
