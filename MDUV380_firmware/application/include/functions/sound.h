@@ -112,6 +112,10 @@ bool soundMelodyIsPlaying(void);
 void soundResetDMRRxAGCGain(void);
 void soundStartDMA(void);
 
+/* M17 helpers called from the TX/RX UI layer */
+void m17SoundStartTx(void);   /* call once when PTT is pressed in M17 mode */
+void m17SoundStartRx(void);   /* call once when entering M17 RX mode */
+
 //bit field to track audio amp usage
 #define AUDIO_AMP_CHANNEL_NONE  0U
 typedef enum

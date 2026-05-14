@@ -89,6 +89,10 @@ menuStatus_t menuTxScreen(uiEvent_t *ev, bool isFirstRun)
 		{
 			clockManagerSetRunMode(kAPP_PowerModeHsrun, CLOCK_MANAGER_SPEED_HS_RUN);
 		}
+		else if (radioMode == RADIO_MODE_M17)
+		{
+			// M17 uses the FM hardware path; no high-speed clock needed
+		}
 		else
 		{
 			isSatelliteScreen = (menuSystemGetPreviousMenuNumber() == MENU_SATELLITE);
@@ -165,6 +169,11 @@ menuStatus_t menuTxScreen(uiEvent_t *ev, bool isFirstRun)
 					aprsBeaconingSendBeacon(true, false);
 				}
 #endif
+			}
+			else if (radioMode == RADIO_MODE_M17)
+			{
+				trxSetTX();
+				m17SoundStartTx();
 			}
 			else
 			{
@@ -460,9 +469,9 @@ static void handleEvent(uiEvent_t *ev)
 				isTransmittingDTMF = false;
 			}
 
-			if (trxGetMode() == RADIO_MODE_ANALOG)
+			if ((trxGetMode() == RADIO_MODE_ANALOG) || (trxGetMode() == RADIO_MODE_M17))
 			{
-				// In analog mode. Stop transmitting immediately
+				// In analog/M17 mode. Stop transmitting immediately
 				LedWrite(LED_RED, 0);
 
 #if defined(HAS_GPS)
@@ -476,6 +485,11 @@ static void handleEvent(uiEvent_t *ev)
 				trxSetRxCSS(RADIO_DEVICE_PRIMARY, currentChannelData->rxTone);
 				trxActivateRx(true);
 				trxIsTransmitting = false;
+
+				if (trxGetMode() == RADIO_MODE_M17)
+				{
+					m17SoundStartRx();
+				}
 
 				menuSystemPopPreviousMenu();
 				uiDataGlobal.displayQSOState = QSO_DISPLAY_DEFAULT_SCREEN; // we need immediate redraw

@@ -679,6 +679,11 @@ void uiChannelModeLoadChannelData(bool useChannelDataInMemory, bool loadVoicePro
 
 	trxSetModeAndBandwidth(currentChannelData->chMode, (codeplugChannelGetFlag(currentChannelData, CHANNEL_FLAG_BW_25K) != 0));
 
+	if (currentChannelData->chMode == RADIO_MODE_M17)
+	{
+		m17SoundStartRx();
+	}
+
 	if (currentChannelData->chMode == RADIO_MODE_ANALOG)
 	{
 		CodeplugAPRSConfig_t aprsConfig;
@@ -1579,12 +1584,21 @@ static void handleEvent(uiEvent_t *ev)
 		}
 		else if (KEYCHECK_SHORTUP(ev->keys, KEY_STAR))
 		{
-			if (BUTTONCHECK_DOWN(ev, BUTTON_SK2))  // Toggle Channel Mode
+			if (BUTTONCHECK_DOWN(ev, BUTTON_SK2))  // Cycle Channel Mode
 			{
 				if (trxGetMode() == RADIO_MODE_ANALOG)
 				{
 					currentChannelData->chMode = RADIO_MODE_DIGITAL;
+					currentChannelData->digitalMode = CHANNEL_DIGITAL_MODE_DMR;
 					uiDataGlobal.VoicePrompts.inhibitInitial = true;// Stop VP playing in loadChannelData
+					uiChannelModeLoadChannelData(true, false);
+					uiDataGlobal.VoicePrompts.inhibitInitial = false;
+					menuChannelExitStatus |= MENU_STATUS_FORCE_FIRST;
+				}
+				else if (currentChannelData->digitalMode == CHANNEL_DIGITAL_MODE_DMR)
+				{
+					currentChannelData->digitalMode = CHANNEL_DIGITAL_MODE_M17;
+					uiDataGlobal.VoicePrompts.inhibitInitial = true;
 					uiChannelModeLoadChannelData(true, false);
 					uiDataGlobal.VoicePrompts.inhibitInitial = false;
 					menuChannelExitStatus |= MENU_STATUS_FORCE_FIRST;

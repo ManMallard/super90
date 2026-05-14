@@ -245,6 +245,7 @@ void trxSetModeAndBandwidth(int mode, bool bandwidthIs25kHz)
 	{
 		mode = RADIO_MODE_ANALOG;
 	}
+	// M17 is never disabled — it uses the FM analog hardware path
 
 	if ((mode != currentRadioDevice->currentMode) || (bandwidthIs25kHz != currentRadioDevice->currentBandWidthIs25kHz))
 	{
@@ -276,6 +277,16 @@ void trxSetModeAndBandwidth(int mode, bool bandwidthIs25kHz)
 				radioSetIF(currentRadioDevice->trxCurrentBand[TRX_RX_FREQ_BAND], currentRadioDevice->currentBandWidthIs25kHz);
 				trxUpdateRadioCalibration();
 				HRC6000InitDigital();
+				break;
+			case RADIO_MODE_M17:
+				/* M17 uses the FM analog hardware path at 12.5 kHz.
+				   The HR-C6000 is put into FM passthrough mode so that the
+				   STM32 software modem can drive/read the baseband directly. */
+				currentRadioDevice->currentBandWidthIs25kHz = BANDWIDTH_12P5KHZ;
+				radioSetMode(RADIO_MODE_M17);
+				trxUpdateC6000Calibration();
+				radioSetIF(currentRadioDevice->trxCurrentBand[TRX_RX_FREQ_BAND], currentRadioDevice->currentBandWidthIs25kHz);
+				trxUpdateRadioCalibration();
 				break;
 		}
 		taskEXIT_CRITICAL();

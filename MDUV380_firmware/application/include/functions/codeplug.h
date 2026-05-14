@@ -199,6 +199,8 @@ typedef struct
 	int			NOT_IN_CODEPLUGDATA_indexNumber;// This property is not part of the codeplug data, its initialised by the code. Index >= 0 are real zone. -1 indicates the virtual "All channels" zone
 } CodeplugZone_t;
 
+typedef enum { CHANNEL_DIGITAL_MODE_DMR = 0, CHANNEL_DIGITAL_MODE_M17 = 1, CHANNEL_DIGITAL_MODE_P25 = 2 } ChannelDigitalMode_t;
+
 typedef struct
 {
 	char name[16];
@@ -215,7 +217,7 @@ typedef struct
 	uint16_t rxTone;
 	uint16_t txTone;
 	uint8_t locationLon2;// Latitude MS byte
-	uint8_t _UNUSED_1;
+	uint8_t digitalMode; // 0=DMR, 1=M17, 2=P25 (only meaningful when chMode==RADIO_MODE_DIGITAL)
 	uint8_t LibreDMR_flag1; // was unmuteRule. 0x80: Optional DMRID sets, 0x40: no beep, 0x20: no Eco, 0x10: OutOfBand(MD9600 only, never saved in codeplug)
 	uint8_t rxSignaling;    // +--
 	uint8_t artsInterval;   // | These 3 bytes were repurposed for optional DMRID
