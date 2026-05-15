@@ -699,7 +699,7 @@ void uiChannelModeLoadChannelData(bool useChannelDataInMemory, bool loadVoicePro
 
 		trxSetRxCSS(RADIO_DEVICE_PRIMARY, currentChannelData->rxTone);
 	}
-	else
+	else if (currentChannelData->chMode == RADIO_MODE_DIGITAL)
 	{
 		uint32_t channelDMRId = codeplugChannelGetOptionalDMRID(currentChannelData);
 

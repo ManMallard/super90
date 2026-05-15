@@ -612,7 +612,10 @@ void codeplugChannelGetDataForIndex(int index, CodeplugChannel_t *channelBuf)
 	// Read the whole channel
 	codeplugChannelGetDataWithOffsetAndLengthForIndex(index, channelBuf, 0, CODEPLUG_CHANNEL_DATA_STRUCT_SIZE);
 
-	channelBuf->chMode = (channelBuf->chMode == 0) ? RADIO_MODE_ANALOG : RADIO_MODE_DIGITAL;
+	/* Codeplug encoding: 0=analog/FM, 1=DMR, 2=M17 */
+	channelBuf->chMode = (channelBuf->chMode == 0) ? RADIO_MODE_ANALOG
+	                   : (channelBuf->chMode == 2) ? RADIO_MODE_M17
+	                   :                             RADIO_MODE_DIGITAL;
 	// Convert legacy codeplug tx and rx freq values into normal integers
 	channelBuf->txFreq = bcd2int(channelBuf->txFreq);
 	channelBuf->rxFreq = bcd2int(channelBuf->rxFreq);
@@ -646,7 +649,10 @@ bool codeplugChannelSaveDataForIndex(int index, CodeplugChannel_t *channelBuf)
 	channelBuf->LibreDMR_flag1 &= ~CODEPLUG_CHANNEL_LIBREDMR_FLAG1_OUT_OF_BAND;
 #endif
 
-	channelBuf->chMode = (channelBuf->chMode == RADIO_MODE_ANALOG) ? 0 : 1;
+	/* Codeplug encoding: 0=analog/FM, 1=DMR, 2=M17 */
+	channelBuf->chMode = (channelBuf->chMode == RADIO_MODE_ANALOG) ? 0
+	                   : (channelBuf->chMode == RADIO_MODE_M17)    ? 2
+	                   :                                              1;
 	// Convert normal integers into legacy codeplug tx and rx freq values
 	channelBuf->txFreq = int2bcd(channelBuf->txFreq);
 	channelBuf->rxFreq = int2bcd(channelBuf->rxFreq);
@@ -735,7 +741,9 @@ errorExit:
 #endif
 
 	// Need to restore the values back to what we need for the operation of the firmware rather than the BCD values the codeplug uses
-	channelBuf->chMode = (channelBuf->chMode == 0) ? RADIO_MODE_ANALOG : RADIO_MODE_DIGITAL;
+	channelBuf->chMode = (channelBuf->chMode == 0) ? RADIO_MODE_ANALOG
+	                   : (channelBuf->chMode == 2) ? RADIO_MODE_M17
+	                   :                             RADIO_MODE_DIGITAL;
 	// Convert the the legacy codeplug tx and rx freq values into normal integers
 	channelBuf->txFreq = bcd2int(channelBuf->txFreq);
 	channelBuf->rxFreq = bcd2int(channelBuf->rxFreq);
@@ -1320,7 +1328,9 @@ void codeplugGetVFO_ChannelData(CodeplugChannel_t *vfoBuf, Channel_t VFONumber)
 	EEPROM_Read(CODEPLUG_ADDR_VFO_A_CHANNEL + (CODEPLUG_CHANNEL_DATA_STRUCT_SIZE * (int)VFONumber), (uint8_t *)vfoBuf, CODEPLUG_CHANNEL_DATA_STRUCT_SIZE);
 
 	// Convert the the legacy codeplug tx and rx freq values into normal integers
-	vfoBuf->chMode = (vfoBuf->chMode == 0) ? RADIO_MODE_ANALOG : RADIO_MODE_DIGITAL;
+	vfoBuf->chMode = (vfoBuf->chMode == 0) ? RADIO_MODE_ANALOG
+	               : (vfoBuf->chMode == 2) ? RADIO_MODE_M17
+	               :                         RADIO_MODE_DIGITAL;
 	vfoBuf->txFreq = bcd2int(vfoBuf->txFreq);
 	vfoBuf->rxFreq = bcd2int(vfoBuf->rxFreq);
 	vfoBuf->txTone = codeplugCSSToInt(vfoBuf->txTone);
@@ -1347,7 +1357,10 @@ void codeplugSetVFO_ChannelData(CodeplugChannel_t *vfoBuf, Channel_t VFONumber)
 
 void codeplugConvertChannelInternalToCodeplug(CodeplugChannel_t *codeplugChannel, CodeplugChannel_t *internalChannel)
 {
-	codeplugChannel->chMode = (internalChannel->chMode == RADIO_MODE_ANALOG) ? 0 : 1;
+	/* Codeplug encoding: 0=analog/FM, 1=DMR, 2=M17 */
+	codeplugChannel->chMode = (internalChannel->chMode == RADIO_MODE_ANALOG) ? 0
+	                        : (internalChannel->chMode == RADIO_MODE_M17)    ? 2
+	                        :                                                   1;
 	codeplugChannel->txFreq = int2bcd(internalChannel->txFreq);
 	codeplugChannel->rxFreq = int2bcd(internalChannel->rxFreq);
 	codeplugChannel->txTone = codeplugIntToCSS(internalChannel->txTone);
