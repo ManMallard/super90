@@ -677,11 +677,12 @@ void soundReceiveRefillData(uint32_t bufNum)
 	   run Codec2, and when we have 2 frames assemble a stream frame. */
 	if (trxGetMode() == RADIO_MODE_M17 && trxTransmissionEnabled)
 	{
-		int16_t mic[WAV_BUFFER_SIZE / 2];
-		for (int i = 0; i < (WAV_BUFFER_SIZE / 2); i++)
-			mic[i] = (int16_t)i2s_Rx_Buffer[bufNum][0][i * 2];
-
-		memcpy(s_c2EncBuf[s_c2EncBufIdx], mic, CODEC2_PCM_SAMPLES * sizeof(int16_t));
+		/* Read both I2S sub-buffers (each 80 samples) directly into the
+		 * 160-sample Codec2 frame buffer — no intermediate copy needed. */
+		int n = 0;
+		for (int j = 0; j < 2; j++)
+			for (int i = 0; i < (WAV_BUFFER_SIZE / 2); i++)
+				s_c2EncBuf[s_c2EncBufIdx][n++] = (int16_t)i2s_Rx_Buffer[bufNum][j][i * 2];
 		s_c2EncBufIdx++;
 
 		if (s_c2EncBufIdx >= M17_C2_FRAMES_PER_M17)

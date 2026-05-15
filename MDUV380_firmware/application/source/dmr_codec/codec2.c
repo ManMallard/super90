@@ -176,8 +176,8 @@ static void lpcToLsp(const float *lpc, int order, float *lsp)
     }
     for (int i = 0; i < M; i++)
     {
-        p[i] += p[order - i];
-        q[i] -= q[order - i];
+        p[i] += lpc[order - i];
+        q[i] -= lpc[order - i];
     }
 
     /* Find roots by Chebyshev evaluation */

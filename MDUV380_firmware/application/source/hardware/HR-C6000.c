@@ -1172,7 +1172,7 @@ static inline void hrc6000SysReceivedDataInt(void)
 				    && currentChannelData->chMode == RADIO_MODE_DIGITAL
 				    && dmr_crypto_rx_should_decrypt_this_call())
 				{
-					dmr_crypto_rx_frame(DMR_frame_buffer + LC_DATA_LENGTH);
+					dmr_crypto_rx_frame((uint8_t *)(DMR_frame_buffer + LC_DATA_LENGTH));
 				}
 
 				if (settingsUsbMode == USB_MODE_HOTSPOT)

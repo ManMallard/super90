@@ -1605,8 +1605,10 @@ static void handleEvent(uiEvent_t *ev)
 				else
 				{
 					currentChannelData->chMode = RADIO_MODE_ANALOG;
-					trxSetModeAndBandwidth(currentChannelData->chMode, (codeplugChannelGetFlag(currentChannelData, CHANNEL_FLAG_BW_25K) != 0));
-					trxSetRxCSS(RADIO_DEVICE_PRIMARY, currentChannelData->rxTone);
+					uiDataGlobal.VoicePrompts.inhibitInitial = true;
+					uiChannelModeLoadChannelData(true, false);
+					uiDataGlobal.VoicePrompts.inhibitInitial = false;
+					menuChannelExitStatus |= MENU_STATUS_FORCE_FIRST;
 				}
 
 				announceItem(PROMPT_SEQUENCE_MODE, PROMPT_THRESHOLD_1);

@@ -705,7 +705,7 @@ static void updateScreen(bool isFirstRun, bool allowedToSpeakUpdate)
 					{
 						static const char encKeyLabel[] = "Enc Key";
 						leftSide = encKeyLabel;
-						if (tmpChannel.chMode != RADIO_MODE_DIGITAL)
+						if (tmpChannel.chMode != RADIO_MODE_DIGITAL && tmpChannel.chMode != RADIO_MODE_M17)
 						{
 							rightSideConst = currentLanguage->n_a;
 						}
