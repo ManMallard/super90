@@ -364,13 +364,13 @@ static void updateScreen(bool isFirstRun, bool allowedToSpeakUpdate)
 						{
 							strcpy(rightSideVar, "FM");
 						}
+						else if (tmpChannel.chMode == RADIO_MODE_M17)
+						{
+							strcpy(rightSideVar, "M17");
+						}
 						else
 						{
-							switch ((ChannelDigitalMode_t)tmpChannel.digitalMode)
-							{
-								case CHANNEL_DIGITAL_MODE_M17: strcpy(rightSideVar, "M17"); break;
-								default:                        strcpy(rightSideVar, "DMR"); break;
-							}
+							strcpy(rightSideVar, "DMR");
 						}
 						break;
 					break;
@@ -406,7 +406,7 @@ static void updateScreen(bool isFirstRun, bool allowedToSpeakUpdate)
 						break;
 					case CH_DETAILS_DMRID:
 						leftSide = currentLanguage->dmr_id;
-						if (tmpChannel.chMode != RADIO_MODE_DIGITAL || tmpChannel.digitalMode != CHANNEL_DIGITAL_MODE_DMR)
+						if (tmpChannel.chMode != RADIO_MODE_DIGITAL)
 						{
 							rightSideConst = currentLanguage->n_a;
 						}
@@ -425,7 +425,7 @@ static void updateScreen(bool isFirstRun, bool allowedToSpeakUpdate)
 						break;
 					case CH_DETAILS_DMR_CC:
 						leftSide = currentLanguage->colour_code;
-						if (tmpChannel.chMode != RADIO_MODE_DIGITAL || tmpChannel.digitalMode != CHANNEL_DIGITAL_MODE_DMR)
+						if (tmpChannel.chMode != RADIO_MODE_DIGITAL)
 						{
 							rightSideConst = currentLanguage->n_a;
 						}
@@ -436,7 +436,7 @@ static void updateScreen(bool isFirstRun, bool allowedToSpeakUpdate)
 						break;
 					case CH_DETAILS_DMR_TS:
 						leftSide = currentLanguage->timeSlot;
-						if (tmpChannel.chMode != RADIO_MODE_DIGITAL || tmpChannel.digitalMode != CHANNEL_DIGITAL_MODE_DMR)
+						if (tmpChannel.chMode != RADIO_MODE_DIGITAL)
 						{
 							rightSideConst = currentLanguage->n_a;
 						}
@@ -447,7 +447,7 @@ static void updateScreen(bool isFirstRun, bool allowedToSpeakUpdate)
 						break;
 					case CH_DETAILS_RXGROUP:
 						leftSide = currentLanguage->tg_list;
-						if (tmpChannel.chMode == RADIO_MODE_DIGITAL && tmpChannel.digitalMode == CHANNEL_DIGITAL_MODE_DMR)
+						if (tmpChannel.chMode == RADIO_MODE_DIGITAL)
 						{
 							if (tmpChannel.rxGroupList == 0)
 							{
@@ -467,7 +467,7 @@ static void updateScreen(bool isFirstRun, bool allowedToSpeakUpdate)
 						break;
 					case CH_DETAILS_CONTACT:
 						leftSide = currentLanguage->contact;
-						if (tmpChannel.chMode == RADIO_MODE_DIGITAL && tmpChannel.digitalMode == CHANNEL_DIGITAL_MODE_DMR)
+						if (tmpChannel.chMode == RADIO_MODE_DIGITAL)
 						{
 							if (tmpChannel.contact == 0)
 							{
@@ -654,7 +654,7 @@ static void updateScreen(bool isFirstRun, bool allowedToSpeakUpdate)
 							bool isTS1 = (mNum == CH_DETAILS_TA_TX_TS1);
 
 							leftSide = (isTS1 ? currentLanguage->transmitTalkerAliasTS1 : currentLanguage->transmitTalkerAliasTS2);
-							if (tmpChannel.chMode == RADIO_MODE_DIGITAL && tmpChannel.digitalMode == CHANNEL_DIGITAL_MODE_DMR)
+							if (tmpChannel.chMode == RADIO_MODE_DIGITAL)
 							{
 								switch(codeplugGetTATxForTS(&tmpChannel, (isTS1 ? 0 : 1)))
 								{
@@ -691,7 +691,7 @@ static void updateScreen(bool isFirstRun, bool allowedToSpeakUpdate)
 						break;
 					case CH_DETAILS_DMR_FORCE_DMO:
 						leftSide = currentLanguage->dmr_force_dmo;
-						if (tmpChannel.chMode != RADIO_MODE_DIGITAL || tmpChannel.digitalMode != CHANNEL_DIGITAL_MODE_DMR)
+						if (tmpChannel.chMode != RADIO_MODE_DIGITAL)
 						{
 							rightSideConst = currentLanguage->n_a;
 						}
@@ -1223,16 +1223,13 @@ static void handleEvent(uiEvent_t *ev)
 					applyShiftOffset(true);
 					break;
 				case CH_DETAILS_MODE:
-					if (tmpChannel.chMode == RADIO_MODE_DIGITAL)
+					if (tmpChannel.chMode == RADIO_MODE_M17)
 					{
-						if (tmpChannel.digitalMode == CHANNEL_DIGITAL_MODE_M17)
-						{
-							tmpChannel.digitalMode = CHANNEL_DIGITAL_MODE_DMR;
-						}
-						else
-						{
-							tmpChannel.chMode = RADIO_MODE_ANALOG;
-						}
+						tmpChannel.chMode = RADIO_MODE_DIGITAL;
+					}
+					else if (tmpChannel.chMode == RADIO_MODE_DIGITAL)
+					{
+						tmpChannel.chMode = RADIO_MODE_ANALOG;
 					}
 					break;
 				case CH_DETAILS_USE_LOCATION:
@@ -1245,7 +1242,7 @@ static void handleEvent(uiEvent_t *ev)
 				case CH_DETAILS_LOCATION_LON:
 					break;
 				case CH_DETAILS_DMR_CC:
-					if (tmpChannel.chMode == RADIO_MODE_DIGITAL && tmpChannel.digitalMode == CHANNEL_DIGITAL_MODE_DMR)
+					if (tmpChannel.chMode == RADIO_MODE_DIGITAL)
 					{
 						if (tmpChannel.txColor < 15)
 						{
@@ -1255,7 +1252,7 @@ static void handleEvent(uiEvent_t *ev)
 					}
 					break;
 				case CH_DETAILS_DMR_TS:
-					if (tmpChannel.chMode == RADIO_MODE_DIGITAL && tmpChannel.digitalMode == CHANNEL_DIGITAL_MODE_DMR)
+					if (tmpChannel.chMode == RADIO_MODE_DIGITAL)
 					{
 						codeplugChannelSetFlag(&tmpChannel, CHANNEL_FLAG_TIMESLOT_TWO, 1);
 					}
@@ -1318,7 +1315,7 @@ static void handleEvent(uiEvent_t *ev)
 					codeplugChannelSetFlag(&tmpChannel, CHANNEL_FLAG_ALL_SKIP, 1);// set Channel All Skip bit (was Lone Worker)
 					break;
 				case CH_DETAILS_RXGROUP:
-					if (tmpChannel.chMode == RADIO_MODE_DIGITAL && tmpChannel.digitalMode == CHANNEL_DIGITAL_MODE_DMR)
+					if (tmpChannel.chMode == RADIO_MODE_DIGITAL)
 					{
 						tmpVal = SAFE_MIN((tmpChannel.rxGroupList + 1), CODEPLUG_RX_GROUPLIST_MAX);
 
@@ -1340,7 +1337,7 @@ static void handleEvent(uiEvent_t *ev)
 					}
 					break;
 				case CH_DETAILS_CONTACT:
-					if (tmpChannel.chMode == RADIO_MODE_DIGITAL && tmpChannel.digitalMode == CHANNEL_DIGITAL_MODE_DMR)
+					if (tmpChannel.chMode == RADIO_MODE_DIGITAL)
 					{
 						tmpVal = SAFE_MIN((tmpChannel.contact + 1), CODEPLUG_CONTACTS_MAX);
 
@@ -1389,7 +1386,7 @@ static void handleEvent(uiEvent_t *ev)
 					break;
 				case CH_DETAILS_TA_TX_TS1:
 				case CH_DETAILS_TA_TX_TS2:
-					if (tmpChannel.chMode == RADIO_MODE_DIGITAL && tmpChannel.digitalMode == CHANNEL_DIGITAL_MODE_DMR)
+					if (tmpChannel.chMode == RADIO_MODE_DIGITAL)
 					{
 						bool isTS1 = (menuDataGlobal.currentItemIndex == CH_DETAILS_TA_TX_TS1);
 						CodeplugTATxDestination_t v = codeplugGetTATxForTS(&tmpChannel, (isTS1 ? 0 : 1));
@@ -1409,7 +1406,7 @@ static void handleEvent(uiEvent_t *ev)
 					}
 					break;
 				case CH_DETAILS_DMR_FORCE_DMO:
-					if (tmpChannel.chMode == RADIO_MODE_DIGITAL && tmpChannel.digitalMode == CHANNEL_DIGITAL_MODE_DMR)
+					if (tmpChannel.chMode == RADIO_MODE_DIGITAL)
 					{
 						codeplugChannelSetFlag(&tmpChannel, CHANNEL_FLAG_FORCE_DMO, 1);// Set Channel DMR Force DMO Bit
 					}
@@ -1472,15 +1469,11 @@ static void handleEvent(uiEvent_t *ev)
 					if (tmpChannel.chMode == RADIO_MODE_ANALOG)
 					{
 						tmpChannel.chMode = RADIO_MODE_DIGITAL;
-						tmpChannel.digitalMode = CHANNEL_DIGITAL_MODE_DMR;
 						codeplugChannelSetFlag(&tmpChannel, CHANNEL_FLAG_BW_25K, 0);// clear 25kHz bit
 					}
 					else if (tmpChannel.chMode == RADIO_MODE_DIGITAL)
 					{
-						if (tmpChannel.digitalMode == CHANNEL_DIGITAL_MODE_DMR)
-						{
-							tmpChannel.digitalMode = CHANNEL_DIGITAL_MODE_M17;
-						}
+						tmpChannel.chMode = RADIO_MODE_M17;
 					}
 					break;
 				case CH_DETAILS_USE_LOCATION:
@@ -1493,7 +1486,7 @@ static void handleEvent(uiEvent_t *ev)
 				case CH_DETAILS_LOCATION_LON:
 					break;
 				case CH_DETAILS_DMR_CC:
-					if (tmpChannel.chMode == RADIO_MODE_DIGITAL && tmpChannel.digitalMode == CHANNEL_DIGITAL_MODE_DMR)
+					if (tmpChannel.chMode == RADIO_MODE_DIGITAL)
 					{
 						if (tmpChannel.txColor > 0)
 						{
@@ -1503,7 +1496,7 @@ static void handleEvent(uiEvent_t *ev)
 					}
 					break;
 				case CH_DETAILS_DMR_TS:
-					if (tmpChannel.chMode == RADIO_MODE_DIGITAL && tmpChannel.digitalMode == CHANNEL_DIGITAL_MODE_DMR)
+					if (tmpChannel.chMode == RADIO_MODE_DIGITAL)
 					{
 						codeplugChannelSetFlag(&tmpChannel, CHANNEL_FLAG_TIMESLOT_TWO, 0);
 					}
@@ -1566,7 +1559,7 @@ static void handleEvent(uiEvent_t *ev)
 					codeplugChannelSetFlag(&tmpChannel, CHANNEL_FLAG_ALL_SKIP, 0);// clear Channel All Skip Bit (was Lone Worker bit)
 					break;
 				case CH_DETAILS_RXGROUP:
-					if (tmpChannel.chMode == RADIO_MODE_DIGITAL && tmpChannel.digitalMode == CHANNEL_DIGITAL_MODE_DMR)
+					if (tmpChannel.chMode == RADIO_MODE_DIGITAL)
 					{
 						tmpVal = tmpChannel.rxGroupList;
 
@@ -1597,7 +1590,7 @@ static void handleEvent(uiEvent_t *ev)
 					}
 					break;
 				case CH_DETAILS_CONTACT:
-					if (tmpChannel.chMode == RADIO_MODE_DIGITAL && tmpChannel.digitalMode == CHANNEL_DIGITAL_MODE_DMR)
+					if (tmpChannel.chMode == RADIO_MODE_DIGITAL)
 					{
 						tmpVal = tmpChannel.contact;
 
@@ -1654,7 +1647,7 @@ static void handleEvent(uiEvent_t *ev)
 					break;
 				case CH_DETAILS_TA_TX_TS1:
 				case CH_DETAILS_TA_TX_TS2:
-					if (tmpChannel.chMode == RADIO_MODE_DIGITAL && tmpChannel.digitalMode == CHANNEL_DIGITAL_MODE_DMR)
+					if (tmpChannel.chMode == RADIO_MODE_DIGITAL)
 					{
 						bool isTS1 = (menuDataGlobal.currentItemIndex == CH_DETAILS_TA_TX_TS1);
 						CodeplugTATxDestination_t v = codeplugGetTATxForTS(&tmpChannel, (isTS1 ? 0 : 1));
@@ -1674,7 +1667,7 @@ static void handleEvent(uiEvent_t *ev)
 					}
 					break;
 				case CH_DETAILS_DMR_FORCE_DMO:
-					if (tmpChannel.chMode == RADIO_MODE_DIGITAL && tmpChannel.digitalMode == CHANNEL_DIGITAL_MODE_DMR)
+					if (tmpChannel.chMode == RADIO_MODE_DIGITAL)
 					{
 						codeplugChannelSetFlag(&tmpChannel, CHANNEL_FLAG_FORCE_DMO, 0);// Clear Channel DMR Force DMO Bit
 					}
