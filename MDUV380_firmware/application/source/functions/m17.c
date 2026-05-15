@@ -229,11 +229,25 @@ static void depuncture(const uint8_t *in, int in_len, const uint8_t *pattern, in
 
 static void viterbiDecode(const uint8_t *in_bits, int in_len, uint8_t *out_bits)
 {
-    /* in_bits: pairs (y0, y1), values 0/1/2(erasure). in_len = #pairs */
-    static int16_t metric[CONV_STATES];
-    static int16_t newMetric[CONV_STATES];
-    /* 4 KB traceback in CCMRAM so it doesn't blow main SRAM .bss budget. */
-    static __attribute__((section(".ccmram"))) uint8_t traceback[250][CONV_STATES];
+    /* in_bits: pairs (y0, y1), values 0/1/2(erasure). in_len = #pairs.
+     *
+     * Bit-packed traceback: each row stores 16 single-bit survivors (one
+     * per state), packed into a uint16_t.  We only need the MSB of each
+     * survivor predecessor — the other 3 bits are determined by the
+     * current next-state because for K=5 the relation
+     *
+     *     next_state = ((prev_state << 1) | input) & 0xF
+     *
+     * means the lower 3 bits of prev_state equal next_state >> 1, and the
+     * MSB is the one degree of freedom.  Recovery during backtrace:
+     *
+     *     prev = ((traceback[t] >> cur) & 1) << 3   |   (cur >> 1)
+     *
+     * Size: 250 * 2 = 500 bytes, vs 250 * 16 = 4000 bytes for a full
+     * predecessor-state table.  Saves 3500 bytes of CCMRAM. */
+    static int16_t  metric[CONV_STATES];
+    static int16_t  newMetric[CONV_STATES];
+    static __attribute__((section(".ccmram"))) uint16_t traceback[250];
 
     int steps = in_len;
     if (steps > 250) steps = 250;
@@ -246,6 +260,8 @@ static void viterbiDecode(const uint8_t *in_bits, int in_len, uint8_t *out_bits)
         uint8_t r0 = in_bits[2 * t];
         uint8_t r1 = in_bits[2 * t + 1];
         for (int s = 0; s < CONV_STATES; s++) newMetric[s] = INF_METRIC;
+
+        uint16_t tb_row = 0;  /* survivor MSBs for this step */
 
         for (int s = 0; s < CONV_STATES; s++)
         {
@@ -263,10 +279,14 @@ static void viterbiDecode(const uint8_t *in_bits, int in_len, uint8_t *out_bits)
                 if (pm < newMetric[ns])
                 {
                     newMetric[ns] = pm;
-                    traceback[t][ns] = (uint8_t)s;
+                    /* Store MSB of survivor predecessor s at bit position ns. */
+                    uint16_t s_msb = (uint16_t)((s >> 3) & 1);
+                    tb_row = (uint16_t)((tb_row & ~((uint16_t)1U << ns))
+                                        | (s_msb << ns));
                 }
             }
         }
+        traceback[t] = tb_row;
         for (int s = 0; s < CONV_STATES; s++) metric[s] = newMetric[s];
     }
 
@@ -281,12 +301,11 @@ static void viterbiDecode(const uint8_t *in_bits, int in_len, uint8_t *out_bits)
     int state = bestState;
     for (int t = steps - 1; t >= 0; t--)
     {
-        int prevState = traceback[t][state];
-        /* The input bit that caused transition prevState → state */
-        out_bits[t] = (uint8_t)((state >> 3) & 1); /* MSB of next state = input bit */
+        int s_msb = (traceback[t] >> state) & 1;
+        int prevState = (s_msb << 3) | (state >> 1);
+        out_bits[t] = (uint8_t)((state >> 3) & 1); /* MSB of next state = decoded bit */
         state = prevState;
     }
-    (void)out_bits; /* already written above */
 }
 
 /* ═══════════════════════════════════════════════════════════════════════
