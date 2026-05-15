@@ -42,25 +42,31 @@
 #include "crypto/dmr_crypto.h"
 /* currentChannelData is declared in functions/settings.h (transitively included) */
 
-/* ── M17 engine (single instance, lives in SRAM) ──────────────────── */
-static M17ModemCtx_t s_m17Ctx;
-static Codec2State_t s_codec2Enc;
-static Codec2State_t s_codec2Dec;
+/* ── M17 engine (single instance) ─────────────────────────────────────
+ * The large buffers below are placed in CCMRAM via the existing .ccmram
+ * section.  Together they account for ~7 KB which would otherwise blow
+ * past the .bss budget on the F405's 128 KB main SRAM.  CCMRAM is 64 KB
+ * and already hosts the audio/hotspot buffer and the beep melody table,
+ * so there is plenty of headroom.  None of these are DMA targets, so the
+ * F4's "no DMA to CCM" restriction does not apply. */
+__attribute__((section(".ccmram"))) static M17ModemCtx_t s_m17Ctx;
+__attribute__((section(".ccmram"))) static Codec2State_t s_codec2Enc;
+__attribute__((section(".ccmram"))) static Codec2State_t s_codec2Dec;
 static bool          s_m17Inited = false;
 
 /* Outgoing M17 stream state */
 static M17Lsf_t      s_m17TxLsf;
-static uint8_t       s_m17TxLsfEncoded[M17_LSF_ENCODED_BITS];
+__attribute__((section(".ccmram"))) static uint8_t s_m17TxLsfEncoded[M17_LSF_ENCODED_BITS];
 static uint16_t      s_m17TxFrameNumber = 0;
 static int8_t        s_m17TxLichChunk   = 0;
 
 /* Codec2 encoder ping-pong: collect 2 × 160-sample frames → 1 M17 payload */
-static int16_t       s_c2EncBuf[M17_C2_FRAMES_PER_M17][CODEC2_PCM_SAMPLES];
+__attribute__((section(".ccmram"))) static int16_t s_c2EncBuf[M17_C2_FRAMES_PER_M17][CODEC2_PCM_SAMPLES];
 static int           s_c2EncBufIdx = 0;   /* 0 or 1 */
 
 /* ── M17 AES-256-CTR encryption state ───────────────────────────────── */
-static struct AES_ctx s_m17TxAesCtx;
-static struct AES_ctx s_m17RxAesCtx;
+__attribute__((section(".ccmram"))) static struct AES_ctx s_m17TxAesCtx;
+__attribute__((section(".ccmram"))) static struct AES_ctx s_m17RxAesCtx;
 static uint8_t        s_m17TxNonce[M17_META_NONCE_BYTES];
 static uint8_t        s_m17RxNonce[M17_META_NONCE_BYTES];
 static uint8_t        s_m17EncTxActive = 0;

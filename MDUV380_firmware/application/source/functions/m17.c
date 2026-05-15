@@ -232,7 +232,8 @@ static void viterbiDecode(const uint8_t *in_bits, int in_len, uint8_t *out_bits)
     /* in_bits: pairs (y0, y1), values 0/1/2(erasure). in_len = #pairs */
     static int16_t metric[CONV_STATES];
     static int16_t newMetric[CONV_STATES];
-    static uint8_t traceback[250][CONV_STATES]; /* up to 250 pairs (500 bits) */
+    /* 4 KB traceback in CCMRAM so it doesn't blow main SRAM .bss budget. */
+    static __attribute__((section(".ccmram"))) uint8_t traceback[250][CONV_STATES];
 
     int steps = in_len;
     if (steps > 250) steps = 250;
