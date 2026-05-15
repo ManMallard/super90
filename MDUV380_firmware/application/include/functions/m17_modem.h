@@ -33,9 +33,16 @@
 #define M17_MODEM_LEVEL_HI         24576  /* ±3 symbol  (75 % FS) */
 #define M17_MODEM_LEVEL_LO          8192  /* ±1 symbol  (25 % FS) */
 
-/* RX sample buffer: enough for two full M17 frames (384 symbols × 2 = 768
-   samples at 5/3 oversampling ≈ 1280 samples; round up to 1536). */
-#define M17_MODEM_RX_BUF_SIZE      1536
+/* TX symbol queue depth: at PTT-down we load preamble (192) + LSF (192) =
+ * 384 symbols, and at steady-state we add one stream frame (192) every
+ * 40 ms while the modem drains ~192 per 40 ms.  Three frames is enough
+ * margin for the startup transient before the first stream frame fires. */
+#define M17_MODEM_TX_QUEUE_LEN     (M17_SYMBOLS_PER_FRAME * 3)
+
+/* RX symbol buffer: STREAM state needs exactly M17_SYMBOLS_PER_FRAME
+ * symbols (8 sync + 184 payload), LSF state needs 184.  SEARCH state
+ * uses a sliding 16-symbol window which is always trimmed back to 8. */
+#define M17_MODEM_RX_SYM_BUF_LEN   M17_SYMBOLS_PER_FRAME
 
 /* Sync correlator threshold: max Hamming distance allowed for sync detect */
 #define M17_SYNC_THRESHOLD         3
@@ -55,27 +62,25 @@ typedef enum {
 
 typedef struct {
     /* TX state */
-    float    txPhase;                            /* 0.0 – 1.0 symbol clock phase */
-    int8_t   txSymbolQueue[M17_SYMBOLS_PER_FRAME * 4]; /* symbol output FIFO */
+    float    txPhase;                                /* 0.0 – 1.0 symbol clock phase */
+    int8_t   txSymbolQueue[M17_MODEM_TX_QUEUE_LEN];  /* symbol output FIFO */
     int      txQueueHead;
     int      txQueueTail;
     int      txQueueCount;
-    int      txSamplesInSymbol;                  /* samples emitted for current sym */
+    int      txSamplesInSymbol;                      /* samples emitted for current sym */
 
-    /* RX state */
+    /* RX state — samples are processed directly from the I2S input slice; no
+     * separate sample buffer is kept in this context. */
     M17ModemState_t state;
-    float    rxPhase;                            /* symbol timing phase */
-    float    rxTED;                              /* timing error */
-    int16_t  rxBuf[M17_MODEM_RX_BUF_SIZE];      /* raw I2S samples */
-    int      rxBufHead;
-    int      rxBufCount;
-    int8_t   rxSymbols[M17_SYMBOLS_PER_FRAME * 2]; /* decoded symbols FIFO */
+    float    rxPhase;                                /* symbol timing phase */
+    float    rxTED;                                  /* timing error */
+    int8_t   rxSymbols[M17_MODEM_RX_SYM_BUF_LEN];    /* decoded symbols FIFO */
     int      rxSymCount;
-    int      rxFrameSymCount;                    /* symbols collected in current frame */
+    int      rxFrameSymCount;                        /* symbols collected in current frame */
 
     /* LICH re-assembly */
     uint8_t  lichPartial[M17_LSF_SIZE];
-    uint8_t  lichChunkSeen;                      /* bitmask of received chunks */
+    uint8_t  lichChunkSeen;                          /* bitmask of received chunks */
     bool     lsfValid;
     M17Lsf_t currentLsf;
     uint16_t frameNumber;
