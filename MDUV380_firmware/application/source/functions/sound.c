@@ -67,13 +67,25 @@ static uint8_t        s_m17EncTxActive = 0;
 static uint8_t        s_m17EncRxActive = 0;
 static uint8_t        s_m17EncRxReady  = 0; /* set once first LSF is processed on RX */
 
-/* Build the 16-byte AES-CTR IV: nonce[0..7] | fn[8..9] | 0[10..15] */
-static void m17MakeAesIv(uint8_t iv[AES_BLOCKLEN], const uint8_t nonce[M17_META_NONCE_BYTES], uint16_t fn)
+/* Build the 16-byte AES-CTR IV per M17 spec: META[0..13] | FN[14..15].
+ * The full 14-byte META carries the per-PTT random nonce in-band via the
+ * LSF; both ends extract the same META and concat the per-frame FN counter
+ * to form the IV.  Matches the IV layout used by OpenRTX, mrefd, etc. */
+static void m17MakeAesIv(uint8_t iv[AES_BLOCKLEN], const uint8_t meta[M17_META_NONCE_BYTES], uint16_t fn)
 {
-    memcpy(iv, nonce, M17_META_NONCE_BYTES);
-    iv[8]  = (uint8_t)(fn >> 8);
-    iv[9]  = (uint8_t)(fn);
-    memset(iv + 10, 0, 6);
+    memcpy(iv, meta, M17_META_NONCE_BYTES);   /* bytes 0..13 */
+    iv[14] = (uint8_t)(fn >> 8);              /* byte 14 */
+    iv[15] = (uint8_t)(fn);                   /* byte 15 */
+}
+
+/* Fill a 14-byte buffer with hardware-RNG random bytes.  dmr_crypto_make_nonce
+ * gives 8 bytes per call; we call it twice and take 14 of the 16 bytes. */
+static void m17MakeRandomMeta(uint8_t out[M17_META_NONCE_BYTES])
+{
+    uint8_t buf[16];
+    dmr_crypto_make_nonce(buf);
+    dmr_crypto_make_nonce(buf + 8);
+    memcpy(out, buf, M17_META_NONCE_BYTES);
 }
 
 static void m17EnsureInited(void)
@@ -107,7 +119,7 @@ static void m17StartTx(void)
         const KeySlot_t *ks = keystore_get(currentChannelData->encKeyIndex);
         if (ks != NULL && (ks->flags & KEY_FLAG_SET))
         {
-            dmr_crypto_make_nonce(s_m17TxNonce);
+            m17MakeRandomMeta(s_m17TxNonce);
             memcpy(s_m17TxLsf.meta, s_m17TxNonce, M17_META_NONCE_BYTES);
             s_m17TxLsf.type = M17_TYPE_DEFAULT | M17_TYPE_ENCRYPTED_AES;
             uint8_t iv[AES_BLOCKLEN];

@@ -60,7 +60,10 @@
 #define M17_TYPE_CODEC2_3200      0x0000U  /* bits[5:4] = 00: Codec2 3200 */
 #define M17_TYPE_ENCRYPTED_NONE   0x0000U  /* bits[7:6] = 00: no encryption */
 #define M17_TYPE_ENCRYPTED_AES    0x0080U  /* bits[7:6] = 10: AES-256 CTR */
-#define M17_META_NONCE_BYTES      8        /* bytes of LSF META used as per-PTT nonce */
+/* AES-CTR IV per the M17 spec: META[0..13] || FN[14..15] = 16 bytes total.
+ * The full 14-byte META field is the per-PTT random portion; the 16-bit
+ * frame number (FN) is the in-frame counter. */
+#define M17_META_NONCE_BYTES      14
 #define M17_TYPE_DEFAULT          (M17_TYPE_STREAM | M17_TYPE_VOICE | M17_TYPE_CODEC2_3200)
 
 /* ── Callsign ───────────────────────────────────────────────────────── */

@@ -381,20 +381,29 @@ void aes_patch_lc_steal_apply_tx(uint8_t *spi_tx)
     spi_tx[LC_STEAL_N3_IDX]    = (uint8_t)(r);
 }
 
-/* RX-side: examine an incoming LC frame. If it has the magic byte and
- * the active slot is in mode PTT (A_LC_STEAL), extract the nonce and
- * re-init RX with it. Idempotent.
+/* RX-side: examine an incoming LC frame and auto-detect the peer's nonce
+ * mode regardless of the local slot's nonceMode setting.  This lets two
+ * radios with the same key interoperate even if one is configured as
+ * DETERMINISTIC and the other as A_LC_STEAL — the local TX mode is still
+ * governed by ks->nonceMode, but RX accepts either wire format.
  *
- * Also sets the s_rxAutodetectAllowDecrypt flag for the voice tap:
- *   - magic byte present, slot in PTT mode -> allow decrypt (encrypted call)
- *   - no magic byte, slot in PTT mode      -> SKIP decrypt (plaintext call)
- *   - any LC, slot in Det mode             -> always allow decrypt
- *   - encryption not engaged at all        -> flag value doesn't matter,
- *                                              taps already skip via
- *                                              dmr_crypto_rx_active()==0 */
+ * Decision:
+ *   - magic byte 0xAE present at LC[2]  -> peer is in A_LC_STEAL mode;
+ *                                          extract 4-byte short nonce from
+ *                                          LC[1] and LC[9..11], re-init RX.
+ *   - magic byte absent                  -> peer is in DETERMINISTIC mode
+ *                                          (or this is plaintext on an
+ *                                          encrypted channel — we cannot
+ *                                          distinguish without a MAC);
+ *                                          ensure RX is using the
+ *                                          key-derived deterministic nonce.
+ *
+ * s_rxAutodetectAllowDecrypt is always 1 in auto-detect mode: we always
+ * try to decrypt with one nonce form or the other.  The earlier
+ * "skip decrypt on no-magic-with-PTT-slot" pass-through behaviour is gone;
+ * that trade-off is explicit in the spec'd cross-mode interop. */
 void aes_patch_lc_steal_check_and_apply_rx(const uint8_t *LCBuf)
 {
-    /* Default to allowing decrypt; Det-mode and fresh state both want this. */
     s_rxAutodetectAllowDecrypt = 1;
 
     /* AES patch: bail if no slot engaged or slot is empty. */
@@ -408,35 +417,41 @@ void aes_patch_lc_steal_check_and_apply_rx(const uint8_t *LCBuf)
         s_lastSeenLcValid = 0;
         return;
     }
-    if (ks->nonceMode != NONCE_MODE_A_LC_STEAL) {
-        /* Det mode: no autodetect; always allow decrypt. */
-        return;
-    }
 
-    /* PTT (LC-steal) mode: gate decrypt on magic byte presence. */
-    if (LCBuf[LC_STEAL_MAGIC_IDX] != LC_STEAL_MAGIC) {
-        /* Plaintext call on encrypted-channel-with-PTT-mode-slot.
-         * Skip decrypt so the audio plays through clear. */
-        s_rxAutodetectAllowDecrypt = 0;
-        s_lastSeenLcValid = 0;
-        return;
+    if (LCBuf[LC_STEAL_MAGIC_IDX] == LC_STEAL_MAGIC)
+    {
+        /* Peer is in A_LC_STEAL — extract the 4-byte short nonce and re-init
+         * RX if this is a new call (different nonce than last seen). */
+        uint32_t nonce32 = ((uint32_t)LCBuf[LC_STEAL_N0_IDX] << 24)
+                         | ((uint32_t)LCBuf[LC_STEAL_N1_IDX] << 16)
+                         | ((uint32_t)LCBuf[LC_STEAL_N2_IDX] << 8)
+                         |  (uint32_t)LCBuf[LC_STEAL_N3_IDX];
+        if (s_lastSeenLcValid && nonce32 == s_lastSeenLcNonce32) {
+            return;  /* same call, no re-init */
+        }
+        memset(s_currentRxNonceFromLC, 0, 8);
+        s_currentRxNonceFromLC[0] = (uint8_t)(nonce32 >> 24);
+        s_currentRxNonceFromLC[1] = (uint8_t)(nonce32 >> 16);
+        s_currentRxNonceFromLC[2] = (uint8_t)(nonce32 >> 8);
+        s_currentRxNonceFromLC[3] = (uint8_t)(nonce32);
+        dmr_crypto_rx_init(ks->key, s_currentRxNonceFromLC);
+        s_lastSeenLcNonce32 = nonce32;
+        s_lastSeenLcValid = 1;
     }
-
-    /* Magic present — encrypted call. Allow decrypt and extract nonce. */
-    uint32_t nonce32 = ((uint32_t)LCBuf[LC_STEAL_N0_IDX] << 24)
-                     | ((uint32_t)LCBuf[LC_STEAL_N1_IDX] << 16)
-                     | ((uint32_t)LCBuf[LC_STEAL_N2_IDX] << 8)
-                     |  (uint32_t)LCBuf[LC_STEAL_N3_IDX];
-    if (s_lastSeenLcValid && nonce32 == s_lastSeenLcNonce32) {
-        return;  /* same call, no re-init */
+    else
+    {
+        /* Peer is in DETERMINISTIC mode (no magic byte).  If we were
+         * previously on A_LC_STEAL, switch RX back to the key-derived
+         * nonce so we can decrypt this call.  If we were already on
+         * deterministic (initial engage_for_current_channel state, or
+         * a previous deterministic peer), there's nothing to re-init. */
+        if (s_lastSeenLcValid)
+        {
+            uint8_t detNonce[8];
+            derive_deterministic_nonce(ks->key, detNonce);
+            dmr_crypto_rx_init(ks->key, detNonce);
+            s_lastSeenLcValid = 0;
+        }
     }
-    memset(s_currentRxNonceFromLC, 0, 8);
-    s_currentRxNonceFromLC[0] = (uint8_t)(nonce32 >> 24);
-    s_currentRxNonceFromLC[1] = (uint8_t)(nonce32 >> 16);
-    s_currentRxNonceFromLC[2] = (uint8_t)(nonce32 >> 8);
-    s_currentRxNonceFromLC[3] = (uint8_t)(nonce32);
-    dmr_crypto_rx_init(ks->key, s_currentRxNonceFromLC);
-    s_lastSeenLcNonce32 = nonce32;
-    s_lastSeenLcValid = 1;
 }
 
