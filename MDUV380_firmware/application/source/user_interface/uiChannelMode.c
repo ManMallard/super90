@@ -1589,15 +1589,14 @@ static void handleEvent(uiEvent_t *ev)
 				if (trxGetMode() == RADIO_MODE_ANALOG)
 				{
 					currentChannelData->chMode = RADIO_MODE_DIGITAL;
-					currentChannelData->digitalMode = CHANNEL_DIGITAL_MODE_DMR;
 					uiDataGlobal.VoicePrompts.inhibitInitial = true;// Stop VP playing in loadChannelData
 					uiChannelModeLoadChannelData(true, false);
 					uiDataGlobal.VoicePrompts.inhibitInitial = false;
 					menuChannelExitStatus |= MENU_STATUS_FORCE_FIRST;
 				}
-				else if (currentChannelData->digitalMode == CHANNEL_DIGITAL_MODE_DMR)
+				else if (trxGetMode() == RADIO_MODE_DIGITAL)
 				{
-					currentChannelData->digitalMode = CHANNEL_DIGITAL_MODE_M17;
+					currentChannelData->chMode = RADIO_MODE_M17;
 					uiDataGlobal.VoicePrompts.inhibitInitial = true;
 					uiChannelModeLoadChannelData(true, false);
 					uiDataGlobal.VoicePrompts.inhibitInitial = false;

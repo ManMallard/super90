@@ -37,6 +37,10 @@
 #include "functions/trx.h"
 #include "functions/m17_modem.h"
 #include "dmr_codec/codec2.h"
+#include "crypto/aes.h"
+#include "crypto/key_storage.h"
+#include "crypto/dmr_crypto.h"
+/* currentChannelData is declared in functions/settings.h (transitively included) */
 
 /* ── M17 engine (single instance, lives in SRAM) ──────────────────── */
 static M17ModemCtx_t s_m17Ctx;
@@ -53,6 +57,36 @@ static int8_t        s_m17TxLichChunk   = 0;
 /* Codec2 encoder ping-pong: collect 2 × 160-sample frames → 1 M17 payload */
 static int16_t       s_c2EncBuf[M17_C2_FRAMES_PER_M17][CODEC2_PCM_SAMPLES];
 static int           s_c2EncBufIdx = 0;   /* 0 or 1 */
+
+/* ── M17 AES-256-CTR encryption state ───────────────────────────────── */
+static struct AES_ctx s_m17TxAesCtx;
+static struct AES_ctx s_m17RxAesCtx;
+static uint8_t        s_m17TxNonce[M17_META_NONCE_BYTES];
+static uint8_t        s_m17RxNonce[M17_META_NONCE_BYTES];
+static uint8_t        s_m17EncTxActive = 0;
+static uint8_t        s_m17EncRxActive = 0;
+static uint8_t        s_m17EncRxReady  = 0; /* set once first LSF is processed on RX */
+
+/* Build the 16-byte AES-CTR IV per M17 spec: META[0..13] | FN[14..15].
+ * The full 14-byte META carries the per-PTT random nonce in-band via the
+ * LSF; both ends extract the same META and concat the per-frame FN counter
+ * to form the IV.  Matches the IV layout used by OpenRTX, mrefd, etc. */
+static void m17MakeAesIv(uint8_t iv[AES_BLOCKLEN], const uint8_t meta[M17_META_NONCE_BYTES], uint16_t fn)
+{
+    memcpy(iv, meta, M17_META_NONCE_BYTES);   /* bytes 0..13 */
+    iv[14] = (uint8_t)(fn >> 8);              /* byte 14 */
+    iv[15] = (uint8_t)(fn);                   /* byte 15 */
+}
+
+/* Fill a 14-byte buffer with hardware-RNG random bytes.  dmr_crypto_make_nonce
+ * gives 8 bytes per call; we call it twice and take 14 of the 16 bytes. */
+static void m17MakeRandomMeta(uint8_t out[M17_META_NONCE_BYTES])
+{
+    uint8_t buf[16];
+    dmr_crypto_make_nonce(buf);
+    dmr_crypto_make_nonce(buf + 8);
+    memcpy(out, buf, M17_META_NONCE_BYTES);
+}
 
 static void m17EnsureInited(void)
 {
@@ -77,8 +111,31 @@ static void m17StartTx(void)
     char myCall[10] = "N0CALL";   /* TODO: read from nonVolatileSettings */
     m17CallsignEncode(myCall, s_m17TxLsf.src);
     memset(s_m17TxLsf.dst, 0xFF, 6);  /* broadcast */
-    s_m17TxLsf.type = M17_TYPE_DEFAULT;
+    /* Encryption setup: if channel has a valid key slot, use AES-256-CTR */
+    s_m17EncTxActive = 0;
     memset(s_m17TxLsf.meta, 0, 14);
+    if (currentChannelData != NULL && currentChannelData->encKeyIndex != 0)
+    {
+        const KeySlot_t *ks = keystore_get(currentChannelData->encKeyIndex);
+        if (ks != NULL && (ks->flags & KEY_FLAG_SET))
+        {
+            m17MakeRandomMeta(s_m17TxNonce);
+            memcpy(s_m17TxLsf.meta, s_m17TxNonce, M17_META_NONCE_BYTES);
+            s_m17TxLsf.type = M17_TYPE_DEFAULT | M17_TYPE_ENCRYPTED_AES;
+            uint8_t iv[AES_BLOCKLEN];
+            m17MakeAesIv(iv, s_m17TxNonce, 0);
+            AES_init_ctx_iv(&s_m17TxAesCtx, ks->key, iv);
+            s_m17EncTxActive = 1;
+        }
+        else
+        {
+            s_m17TxLsf.type = M17_TYPE_DEFAULT;
+        }
+    }
+    else
+    {
+        s_m17TxLsf.type = M17_TYPE_DEFAULT;
+    }
 
     /* Encode LSF */
     m17LsfEncode(&s_m17TxLsf, s_m17TxLsfEncoded);
@@ -537,9 +594,55 @@ void soundReceiveRefillData(uint32_t bufNum)
 
 		M17StreamFrame_t frame;
 		M17Lsf_t lsf;
+		/* Defensive: the modem only fills lsf when lsfValid is true.
+		   Zero it so a stale-stack read cannot leak an old META/TYPE. */
+		memset(&lsf, 0, sizeof(lsf));
 		if (m17ModemRxFeed(&s_m17Ctx, rxSlice, nSamples, &frame, &lsf))
 		{
-			/* Decode two Codec2 frames from the 16-byte payload */
+			/* (Re-)initialise RX crypto when LSF nonce changes — covers first
+			   reception and the multi-sender case where a new caller takes
+			   over with a different per-PTT nonce.  The modem fills lsf from
+			   its internal lichPartial whenever lsfValid is true, so lsf is
+			   the authoritative source (ctx->currentLsf is only updated by
+			   the LSF-burst path, not by LICH reassembly). */
+			if (s_m17Ctx.lsfValid)
+			{
+				bool nonceChanged = !s_m17EncRxReady ||
+					(memcmp(lsf.meta, s_m17RxNonce, M17_META_NONCE_BYTES) != 0);
+
+				if (nonceChanged)
+				{
+					s_m17EncRxActive = 0;
+					/* Cache the new META so we don't keep re-running the
+					   keystore lookup every frame until the next change. */
+					memcpy(s_m17RxNonce, lsf.meta, M17_META_NONCE_BYTES);
+
+					if ((lsf.type & M17_TYPE_ENCRYPTED_AES) == M17_TYPE_ENCRYPTED_AES
+					    && currentChannelData != NULL && currentChannelData->encKeyIndex != 0)
+					{
+						const KeySlot_t *ks = keystore_get(currentChannelData->encKeyIndex);
+						if (ks != NULL && (ks->flags & KEY_FLAG_SET))
+						{
+							uint8_t iv[AES_BLOCKLEN];
+							m17MakeAesIv(iv, s_m17RxNonce, 0);
+							AES_init_ctx_iv(&s_m17RxAesCtx, ks->key, iv);
+							s_m17EncRxActive = 1;
+						}
+					}
+					s_m17EncRxReady = 1;
+				}
+			}
+
+			/* AES-256-CTR decrypt payload before handing to Codec2 */
+			if (s_m17EncRxActive)
+			{
+				uint8_t iv[AES_BLOCKLEN];
+				m17MakeAesIv(iv, s_m17RxNonce, frame.fn);
+				memcpy(s_m17RxAesCtx.Iv, iv, AES_BLOCKLEN);
+				AES_CTR_xcrypt_buffer(&s_m17RxAesCtx, frame.payload, M17_STREAM_PAYLOAD_BYTES);
+			}
+
+			/* Decode two Codec2 frames from the (now plaintext) payload */
 			for (int cf = 0; cf < M17_C2_FRAMES_PER_M17; cf++)
 			{
 				int16_t pcm[CODEC2_PCM_SAMPLES];
@@ -584,6 +687,15 @@ void soundReceiveRefillData(uint32_t bufNum)
 			for (int cf = 0; cf < M17_C2_FRAMES_PER_M17; cf++)
 				codec2Encode(&s_codec2Enc, s_c2EncBuf[cf],
 				             frame.payload + cf * M17_C2_FRAME_BYTES);
+
+			/* AES-256-CTR encrypt payload if key is configured */
+			if (s_m17EncTxActive)
+			{
+				uint8_t iv[AES_BLOCKLEN];
+				m17MakeAesIv(iv, s_m17TxNonce, frame.fn);
+				memcpy(s_m17TxAesCtx.Iv, iv, AES_BLOCKLEN);
+				AES_CTR_xcrypt_buffer(&s_m17TxAesCtx, frame.payload, M17_STREAM_PAYLOAD_BYTES);
+			}
 
 			/* Build LICH chunk */
 			uint8_t rawLsf[M17_LSF_SIZE];
@@ -645,6 +757,8 @@ void m17SoundStartRx(void)
 	m17EnsureInited();
 	m17ModemRxReset(&s_m17Ctx);
 	s_c2EncBufIdx = 0;
+	s_m17EncRxActive = 0;
+	s_m17EncRxReady  = 0;
 }
 
 void soundTickRXBuffer(void)
