@@ -27,20 +27,14 @@
 #define CODEC2_LPC_ORDER    10   /* LPC filter order */
 
 typedef struct {
-    /* Encoder state */
-    float encPrevPCM[CODEC2_PCM_SAMPLES];
-    float encLsp[CODEC2_LPC_ORDER];
-    float encPitch;
-    int   encFrameCount;
-
-    /* Decoder state */
-    float decSynthMem[CODEC2_LPC_ORDER]; /* synthesis filter memory */
-    float decExcPrev;
-    float decPitchPhase;
-    float decLsp[CODEC2_LPC_ORDER];
-    float decLspPrev[CODEC2_LPC_ORDER];
-    float decEnergy;
-    int   decFrameCount;
+    /* Decoder state.  The encoder is stateless across calls — no fields
+     * are needed for it.  Earlier revisions kept a 160-sample float
+     * encPrevPCM buffer and several write-only LSP/energy/frame-count
+     * fields; all were removed after audit confirmed they were never
+     * read by either codec2Encode() or codec2Decode(). */
+    float decSynthMem[CODEC2_LPC_ORDER];    /* synthesis filter memory */
+    float decPitchPhase;                    /* synth pitch-pulse phase */
+    float decLspPrev[CODEC2_LPC_ORDER];     /* LSP interpolation across frames */
 } Codec2State_t;
 
 /* Initialise the codec state */

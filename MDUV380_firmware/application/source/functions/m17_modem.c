@@ -97,7 +97,7 @@ void m17ModemTxLoad(M17ModemCtx_t *ctx, const int8_t symbols[M17_SYMBOLS_PER_FRA
     for (int i = 0; i < M17_SYMBOLS_PER_FRAME; i++)
     {
         ctx->txSymbolQueue[ctx->txQueueTail] = symbols[i];
-        ctx->txQueueTail = (ctx->txQueueTail + 1) % (M17_SYMBOLS_PER_FRAME * 4);
+        ctx->txQueueTail = (ctx->txQueueTail + 1) % M17_MODEM_TX_QUEUE_LEN;
         ctx->txQueueCount++;
     }
 }
@@ -131,7 +131,7 @@ int m17ModemTxFill(M17ModemCtx_t *ctx, int16_t *out, int count)
         if (ctx->txPhase >= 1.0f)
         {
             ctx->txPhase -= 1.0f;
-            ctx->txQueueHead = (ctx->txQueueHead + 1) % (M17_SYMBOLS_PER_FRAME * 4);
+            ctx->txQueueHead = (ctx->txQueueHead + 1) % M17_MODEM_TX_QUEUE_LEN;
             ctx->txQueueCount--;
         }
     }

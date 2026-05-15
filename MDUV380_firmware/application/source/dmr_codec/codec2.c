@@ -354,10 +354,7 @@ static void synthesise(Codec2State_t *st, float *pcm, int N,
 void codec2Init(Codec2State_t *st)
 {
     memset(st, 0, sizeof(*st));
-    memcpy(st->encLsp,     LSP_INIT, sizeof(LSP_INIT));
-    memcpy(st->decLsp,     LSP_INIT, sizeof(LSP_INIT));
     memcpy(st->decLspPrev, LSP_INIT, sizeof(LSP_INIT));
-    st->decEnergy = 1.0f;
 }
 
 void codec2Encode(Codec2State_t *st, const int16_t pcm[CODEC2_PCM_SAMPLES],
@@ -389,12 +386,10 @@ void codec2Encode(Codec2State_t *st, const int16_t pcm[CODEC2_PCM_SAMPLES],
     /* LPC → LSP */
     float lsp[CODEC2_LPC_ORDER];
     lpcToLsp(lpc, CODEC2_LPC_ORDER, lsp);
-    memcpy(st->encLsp, lsp, sizeof(lsp));
 
     /* Pitch detection */
     bool voiced;
     int pitch = detectPitch(xf, CODEC2_PCM_SAMPLES, &voiced);
-    st->encPitch = (float)pitch;
 
     /* Energy: mean square power */
     float energy = 0.0f;
@@ -500,7 +495,4 @@ void codec2Decode(Codec2State_t *st, const uint8_t bits[CODEC2_FRAME_BYTES],
         if (s < -32768.0f) s = -32768.0f;
         pcm[i] = (int16_t)s;
     }
-
-    st->decFrameCount++;
-    memcpy(st->decLsp, lsp, sizeof(lsp));
 }
