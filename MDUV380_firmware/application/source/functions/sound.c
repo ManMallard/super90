@@ -40,8 +40,7 @@
 #include "crypto/aes.h"
 #include "crypto/key_storage.h"
 #include "crypto/dmr_crypto.h"
-
-extern CodeplugChannel_t *currentChannelData;
+/* currentChannelData is declared in functions/settings.h (transitively included) */
 
 /* ── M17 engine (single instance, lives in SRAM) ──────────────────── */
 static M17ModemCtx_t s_m17Ctx;
@@ -583,26 +582,43 @@ void soundReceiveRefillData(uint32_t bufNum)
 
 		M17StreamFrame_t frame;
 		M17Lsf_t lsf;
+		/* Defensive: the modem only fills lsf when lsfValid is true.
+		   Zero it so a stale-stack read cannot leak an old META/TYPE. */
+		memset(&lsf, 0, sizeof(lsf));
 		if (m17ModemRxFeed(&s_m17Ctx, rxSlice, nSamples, &frame, &lsf))
 		{
-			/* One-time RX encryption setup once LSF has been assembled */
-			if (!s_m17EncRxReady && s_m17Ctx.lsfValid)
+			/* (Re-)initialise RX crypto when LSF nonce changes — covers first
+			   reception and the multi-sender case where a new caller takes
+			   over with a different per-PTT nonce.  The modem fills lsf from
+			   its internal lichPartial whenever lsfValid is true, so lsf is
+			   the authoritative source (ctx->currentLsf is only updated by
+			   the LSF-burst path, not by LICH reassembly). */
+			if (s_m17Ctx.lsfValid)
 			{
-				s_m17EncRxActive = 0;
-				if ((s_m17Ctx.currentLsf.type & M17_TYPE_ENCRYPTED_AES) == M17_TYPE_ENCRYPTED_AES
-				    && currentChannelData != NULL && currentChannelData->encKeyIndex != 0)
+				bool nonceChanged = !s_m17EncRxReady ||
+					(memcmp(lsf.meta, s_m17RxNonce, M17_META_NONCE_BYTES) != 0);
+
+				if (nonceChanged)
 				{
-					const KeySlot_t *ks = keystore_get(currentChannelData->encKeyIndex);
-					if (ks != NULL && (ks->flags & KEY_FLAG_SET))
+					s_m17EncRxActive = 0;
+					/* Cache the new META so we don't keep re-running the
+					   keystore lookup every frame until the next change. */
+					memcpy(s_m17RxNonce, lsf.meta, M17_META_NONCE_BYTES);
+
+					if ((lsf.type & M17_TYPE_ENCRYPTED_AES) == M17_TYPE_ENCRYPTED_AES
+					    && currentChannelData != NULL && currentChannelData->encKeyIndex != 0)
 					{
-						memcpy(s_m17RxNonce, s_m17Ctx.currentLsf.meta, M17_META_NONCE_BYTES);
-						uint8_t iv[AES_BLOCKLEN];
-						m17MakeAesIv(iv, s_m17RxNonce, 0);
-						AES_init_ctx_iv(&s_m17RxAesCtx, ks->key, iv);
-						s_m17EncRxActive = 1;
+						const KeySlot_t *ks = keystore_get(currentChannelData->encKeyIndex);
+						if (ks != NULL && (ks->flags & KEY_FLAG_SET))
+						{
+							uint8_t iv[AES_BLOCKLEN];
+							m17MakeAesIv(iv, s_m17RxNonce, 0);
+							AES_init_ctx_iv(&s_m17RxAesCtx, ks->key, iv);
+							s_m17EncRxActive = 1;
+						}
 					}
+					s_m17EncRxReady = 1;
 				}
-				s_m17EncRxReady = 1;
 			}
 
 			/* AES-256-CTR decrypt payload before handing to Codec2 */
