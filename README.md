@@ -15,7 +15,7 @@ This functionality is provided by the official firmware which is merged with the
 
 See https://github.com/LibreDMR/OpenGD77_UserGuide for most functionality, changes below.
 
-#Sneaky390 Unique Features
+# Sneaky390 Unique Features
 
 
 # Copyright
