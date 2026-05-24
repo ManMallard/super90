@@ -1387,6 +1387,10 @@ static void handleEvent(uiEvent_t *ev)
 							}
 							announceItem(PROMPT_SEQUENCE_TS,PROMPT_THRESHOLD_3);
 						}
+						else if (trxGetMode() == RADIO_MODE_M17)
+						{
+							// Star key has no function in M17 mode (no timeslot, no FM bandwidth)
+						}
 						else
 						{
 							toggleAnalogBandwidth();
