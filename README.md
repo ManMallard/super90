@@ -1,6 +1,6 @@
 # OpenGD77
 Firmware for DMR transceivers using the STM32F405VGT MCU, AT1846S RF chip and HR-C6000 DMR chipset.  
-Including the Radioddiy TYT MD-380UV / Retevis RT-3S and Baofeng DM-1701 / Retevis RT-84
+Including the Radioddiy TYT MD-380UV MD-390UV/ Retevis RT-3S and Baofeng DM-1701 / Retevis RT-84
 
 # Project status
 
@@ -13,12 +13,14 @@ This functionality is provided by the official firmware which is merged with the
 
 # User guide
 
-See https://github.com/LibreDMR/OpenGD77_UserGuide
+See https://github.com/LibreDMR/OpenGD77_UserGuide for most functionality, changes below.
+
+#Sneaky390 Unique Features
 
 
 # Copyright
 
- The firmware is copyright of the OpenGD77 developers. See individual source files for copyright information.
+ The firmware is not copy written or proprietary in anyway. See individual source files for any additional copyright information copyright information.
 
 ## MCU SDK and API code:   
    See license files in sub-folders
