@@ -892,6 +892,10 @@ void uiVFOModeLoadChannelData(bool forceAPRSReset)
 			uiDataGlobal.Scan.state = SCAN_STATE_SCANNING;
 		}
 	}
+	else if (currentChannelData->chMode == RADIO_MODE_M17)
+	{
+		m17SoundStartRx();
+	}
 	else
 	{
 		uint32_t channelDMRId = codeplugChannelGetOptionalDMRID(currentChannelData);
@@ -1341,13 +1345,19 @@ static void handleEvent(uiEvent_t *ev)
 							checkAndFixIndexInRxGroup();
 							uiVFOModeLoadChannelData(true);
 							updateTrxID();
-
 							menuVFOExitStatus |= MENU_STATUS_FORCE_FIRST;
 						}
-						else
+						else if (trxGetMode() == RADIO_MODE_DIGITAL)
+						{
+							currentChannelData->chMode = RADIO_MODE_M17;
+							uiVFOModeLoadChannelData(true);
+							menuVFOExitStatus |= MENU_STATUS_FORCE_FIRST;
+						}
+						else  // M17 → ANALOG
 						{
 							currentChannelData->chMode = RADIO_MODE_ANALOG;
-							trxSetModeAndBandwidth(currentChannelData->chMode, (codeplugChannelGetFlag(currentChannelData, CHANNEL_FLAG_BW_25K) != 0));
+							uiVFOModeLoadChannelData(true);
+							menuVFOExitStatus |= MENU_STATUS_FORCE_FIRST;
 						}
 
 						announceItem(PROMPT_SEQUENCE_MODE, PROMPT_THRESHOLD_1);
@@ -1376,6 +1386,10 @@ static void handleEvent(uiEvent_t *ev)
 								menuVFOExitStatus |= MENU_STATUS_FORCE_FIRST;
 							}
 							announceItem(PROMPT_SEQUENCE_TS,PROMPT_THRESHOLD_3);
+						}
+						else if (trxGetMode() == RADIO_MODE_M17)
+						{
+							// Star key has no function in M17 mode (no timeslot, no FM bandwidth)
 						}
 						else
 						{
