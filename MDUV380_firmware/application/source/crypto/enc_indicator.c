@@ -27,7 +27,7 @@
 #include "hardware/HR-C6000.h"    /* slotState, DMR_STATE_RX_* */
 #include "hardware/HX8353E.h"     /* displayPrintAt, FONT_SIZE_1 */
 #include "io/LEDs.h"              /* LedWrite, LED_RED, LED_GREEN */
-#include "user_interface/uiGlobals.h" /* DISPLAY_Y_POS_CONTACT */
+#include "user_interface/uiGlobals.h" /* DISPLAY_Y_POS_CONTACT_TX */
 #include <stddef.h>
 
 extern CodeplugChannel_t *currentChannelData;
@@ -77,10 +77,10 @@ void enc_indicator_render(void)
     {
         /* Assigned slot is empty — audio transmits IN THE CLEAR.
          * Show warning ONLY while PTT is pressed (trxTransmissionEnabled).
-         * Position: below the TOT timer (DISPLAY_Y_POS_TX_TIMER) and above
-         * the contact / channel-name rows (DISPLAY_Y_POS_CONTACT). */
+         * Position: one font row (8 px) below the talk-group / contact line
+         * so it reads: TOT timer → TG number → ENC warning → channel name. */
         if (trxTransmissionEnabled) {
-            displayPrintAt(0, DISPLAY_Y_POS_CONTACT, "ENC ACTIVE NO KEY NO ENC", FONT_SIZE_1);
+            displayPrintAt(0, DISPLAY_Y_POS_CONTACT_TX + 8, "ENC ACTIVE NO KEY NO ENC", FONT_SIZE_1);
         }
         goto end_no_warn;
     }
