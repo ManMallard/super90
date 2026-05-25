@@ -109,6 +109,8 @@ If flashing fails or behaves unexpectedly, you will need the backup to recover y
 
 ## Building the Firmware
 
+Note: A pre-built version is available at /main/MDUV380_firmware/MDUV380_FW/OpenMDUV380.bin
+
 ### Quick Path: Using Pre-Patched MDUV380_Firmware (Recommended)
 
 The included `MDUV380_firmware` folder already contains all Super90 enhancements based on OpenGD77 MDUV380 firmware version 20260131. **If you are using firmware from January 31, 2026 or earlier, skip the patcher and build directly:**
