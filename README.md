@@ -95,10 +95,16 @@ If flashing fails or behaves unexpectedly, you will need the backup to recover y
 
 4. **UI & Bug Fixes**
    - SK key combinations for call signals and mode cycling
-   - **SK1 + SK2 + PTT** call-signal chord now works with sounds disabled
-     (was silently failing in AUDIO_PROMPT_MODE_SILENT because the eco
-     state machine left the AT1846 / HR-C6000 half-asleep — the chord now
-     forces a wake-up and stops any in-flight beep before keying TX)
+   - **Call-signal chord redesigned to PTT + SK1.** While holding PTT in
+     FM/analog mode, tap **SK1** to play the power-on tone sequence over
+     the live TX (modulator briefly diverts from mic to AT1846 tone-1).
+     When the melody finishes the mic path is restored automatically and
+     normal voice TX continues; releasing PTT cleanly unlatches TX whether
+     SK1 is still held or not. Replaces the older SK1+SK2+PTT chord, which
+     also silently failed when "all sounds off" was set (the eco state
+     machine left the AT1846 / HR-C6000 deep-asleep). The new path also
+     forces a power-save wake-up and stops any in-flight beep before
+     retargeting the modulator.
    - ENC warning positioning and display improvements
    - Fixed M17 mode persistence across channel reloads
    - Memory optimizations (Viterbi traceback reduced 4KB→500B)
