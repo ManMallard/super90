@@ -84,9 +84,21 @@ If flashing fails or behaves unexpectedly, you will need the backup to recover y
    - New GPS submenu with waypoint tracking page
    - Ability to save and review GPS coordinates
    - Travel distance calculation between waypoints
+   - Each saved fix now displays the UTC time **and** a short DD/MM/YY date
+   - **SK2 + #** on the Waypoints page bulk-prunes the list, keeping only the
+     first and last waypoints (the reference and the most recent fix)
+   - **SK2 + GREEN** on the GPS screen cycles the GPS output mode through
+     **NO LOG → NMEA → Log → NO LOG** with an on-screen popup at every step.
+     GPS stays powered the whole time — SK2 + GREEN never turns GPS off
+     (use **SK2 + RED** for that). "NO LOG" is GPS active with no NMEA
+     stream and no flash logging.
 
 4. **UI & Bug Fixes**
    - SK key combinations for call signals and mode cycling
+   - **SK1 + SK2 + PTT** call-signal chord now works with sounds disabled
+     (was silently failing in AUDIO_PROMPT_MODE_SILENT because the eco
+     state machine left the AT1846 / HR-C6000 half-asleep — the chord now
+     forces a wake-up and stops any in-flight beep before keying TX)
    - ENC warning positioning and display improvements
    - Fixed M17 mode persistence across channel reloads
    - Memory optimizations (Viterbi traceback reduced 4KB→500B)
@@ -214,6 +226,15 @@ For general OpenGD77 functionality, UI navigation, contacts management, and zone
 **GPS Waypoints**
 - **Menu → GPS → Waypoints** to view saved coordinates
 - Coordinates are logged automatically when GPS is enabled
+- On the Waypoints page:
+  - **\*** saves the current fix as a new waypoint
+  - **Long-press #** deletes the selected waypoint
+  - **SK2 + #** prunes intermediates, keeping only the first and last waypoint
+  - **LEFT / RIGHT** (or rotary) cycles through saved waypoints
+- On any GPS page:
+  - **SK2 + GREEN** cycles output mode: NO LOG → NMEA → Log → NO LOG
+    (popup on each step; GPS stays powered)
+  - **SK2 + RED** steps GPS power down one mode toward Off
 
 ## Copyright & Licensing
 

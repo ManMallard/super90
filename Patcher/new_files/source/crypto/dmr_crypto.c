@@ -413,10 +413,13 @@ void aes_patch_lc_steal_check_and_apply_rx(const uint8_t *LCBuf)
         return;
     }
 
-    /* PTT (LC-steal) mode: gate decrypt on magic byte presence. */
+    /* PTT (LC-steal) mode: gate decrypt on magic byte presence.  Without
+     * the magic byte we ASSUME the call is plaintext and skip decryption
+     * so the audio passes through clear.  This is the deliberate trade-off
+     * for preserving plaintext pass-through on encrypted channels — the
+     * cost is that DETERMINISTIC-mode peers cannot be decoded by a
+     * A_LC_STEAL receiver (both ends must be on the same nonce mode). */
     if (LCBuf[LC_STEAL_MAGIC_IDX] != LC_STEAL_MAGIC) {
-        /* Plaintext call on encrypted-channel-with-PTT-mode-slot.
-         * Skip decrypt so the audio plays through clear. */
         s_rxAutodetectAllowDecrypt = 0;
         s_lastSeenLcValid = 0;
         return;

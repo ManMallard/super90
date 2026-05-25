@@ -1178,20 +1178,39 @@ static bool displayWaypoints(bool isFirstRun, bool forceRedraw)
 	const gpsWaypoint_t *pt   = &s_bank.pts[s_wayptSelected];
 	const gpsWaypoint_t *ref  = &s_bank.pts[0];
 	const gpsWaypoint_t *prev = (s_wayptSelected > 0) ? &s_bank.pts[s_wayptSelected - 1] : NULL;
-	char buf[32], latBuf[12], lonBuf[12], timeBuf[10];
+	char buf[32], latBuf[12], lonBuf[12], timeBuf[10], dateBuf[10];
 
-	/* Row 1 (FONT_SIZE_3, y=16): "P03/32   12:34:56" */
+	/* Row 1 layout:
+	 *   left  (FONT_SIZE_3, y=16): "P03/32"     — selection / total
+	 *   right (FONT_SIZE_1, y=16): "HH:MM:SS"   — fix time of day (UTC)
+	 *   right (FONT_SIZE_1, y=24): "DD/MM/YY"   — fix date (UTC, short)
+	 * Two stacked FONT_SIZE_1 lines (8 px each) total the same 16 px height
+	 * as the FONT_SIZE_3 page-counter on the left, so row 2 at y=32 is
+	 * unaffected. */
 	if (pt->timeSec != 0)
 	{
+		time_t_custom ts = (time_t_custom)pt->timeSec;
+		struct tm     tmv;
+
+		gmtime_r_Custom(&ts, &tmv);
 		wayptFmtHMS(timeBuf, sizeof(timeBuf), (uint32_t)(pt->timeSec % 86400u));
+		snprintf(dateBuf, sizeof(dateBuf), "%02d/%02d/%02d",
+		         tmv.tm_mday, tmv.tm_mon + 1, tmv.tm_year % 100);
 	}
 	else
 	{
 		snprintf(timeBuf, sizeof(timeBuf), "--:--:--");
+		snprintf(dateBuf, sizeof(dateBuf), "--/--/--");
 	}
-	snprintf(buf, sizeof(buf), "P%02d/%lu  %s",
-	         s_wayptSelected + 1, (unsigned long)s_bank.count, timeBuf);
+	snprintf(buf, sizeof(buf), "P%02d/%lu",
+	         s_wayptSelected + 1, (unsigned long)s_bank.count);
 	displayPrintAt(2, 16, buf, FONT_SIZE_3);
+	/* Right-aligned stack of time-of-day and date in the small font.
+	 * Each FONT_SIZE_1 glyph is 8 px wide on the colour displays;
+	 * 8 chars × 8 = 64 px → comfortably fits next to "P03/32" on a 160 px
+	 * wide display. */
+	displayPrintAt(DISPLAY_SIZE_X - (8 * 8) - 2, 16, timeBuf, FONT_SIZE_1);
+	displayPrintAt(DISPLAY_SIZE_X - (8 * 8) - 2, 24, dateBuf, FONT_SIZE_1);
 
 	/* Row 2 (FONT_SIZE_3, y=32): "52.1234N 004.5678E" */
 	wayptFmtCoord(latBuf, sizeof(latBuf), pt->lat, true);
@@ -1630,6 +1649,25 @@ static void handleEvent(uiEvent_t *ev)
 			soundSetMelody(MELODY_ACK_BEEP);
 			isDirty = true;
 		}
+	}
+	/* SK2 + HASH (short press): bulk-prune — keep only the first and last
+	 * waypoints, drop everything in between.  Useful for clearing out
+	 * intermediate breadcrumbs while preserving the start/finish reference
+	 * points.  No-op unless there are at least 3 waypoints (nothing to prune).
+	 * Must be evaluated BEFORE the standalone KEY_HASH long-press delete
+	 * handler below, since SK2-modified keys are otherwise indistinguishable
+	 * at the LONGDOWN level. */
+	else if (KEYCHECK_SHORTUP(ev->keys, KEY_HASH) && BUTTONCHECK_DOWN(ev, BUTTON_SK2) &&
+	         menuDataGlobal.currentItemIndex == PAGE_WAYPOINTS &&
+	         s_bank.count > 2)
+	{
+		s_bank.pts[1] = s_bank.pts[s_bank.count - 1]; /* promote last to slot 1 */
+		s_bank.count = 2;
+		s_wayptSelected = 0;                          /* re-anchor at P01      */
+		wayptClampSelected();
+		waypointsSave();                              /* persist prune         */
+		soundSetMelody(MELODY_ACK_BEEP);
+		isDirty = true;
 	}
 	/* HASH long-press: delete the selected waypoint and compact the array. */
 	else if (KEYCHECK_LONGDOWN(ev->keys, KEY_HASH) &&

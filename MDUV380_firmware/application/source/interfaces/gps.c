@@ -466,21 +466,27 @@ void gpsOnUsingQuickKey(bool on)
 	uiEvent_t e = { .buttons = BUTTON_NONE, .keys = NO_KEYCODE, .rotary = 0, .events = FUNCTION_EVENT, .hasEvent = true, .time = ticksGetMillis() };
 	bool sendEvent = false;
 
-	// Use QuickKey to change GPS power status.  At the last mode (GPS_MODE_ON_LOG)
-	// wrap around to GPS_MODE_ON so SK2+GREEN cycles On→NMEA→Log→On.
+	// Use QuickKey to change GPS power status.  SK2+GREEN cycles
+	//   No Log → NMEA → Log → No Log → …
+	// "No Log" is the existing GPS_MODE_ON state (GPS powered, no NMEA stream
+	// and no flash logging).  Off is intentionally NOT part of this cycle —
+	// SK2+RED is still the way to turn GPS off.
+	//
+	// The wrap from GPS_MODE_ON_LOG back to GPS_MODE_ON is implemented by
+	// pre-setting mode to GPS_MODE_OFF and then handing off to MENU_GENERAL
+	// with FUNC_RIGHT.  The menu's GENERAL_OPTIONS_GPS RIGHT branch advances
+	// OFF→ON, re-invokes gpsOn() (idempotent — power is already up), and
+	// renders the new "GPS:NO LOG" popup that mirrors the NMEA/Log popups.
 	if (on && (SETTINGS_GPS_MODE_GET(nonVolatileSettings) > GPS_NOT_DETECTED)
 	       && (SETTINGS_GPS_MODE_GET(nonVolatileSettings) >= GPS_MODE_ON))
 	{
 		if (SETTINGS_GPS_MODE_GET(nonVolatileSettings) >= (NUM_GPS_MODES - 1))
 		{
-			/* Wrap from GPS_MODE_ON_LOG back to GPS_MODE_ON */
 #if defined(LOG_GPS_DATA)
 			gpsLoggingStop();
 #endif
 			settingsSet(nonVolatileSettings.gpsModeAndBaudsIndex,
-			            SETTINGS_GPS_MODE_SET(nonVolatileSettings, GPS_MODE_ON));
-			settingsSaveIfNeeded(true);
-			return;
+			            SETTINGS_GPS_MODE_SET(nonVolatileSettings, GPS_MODE_OFF));
 		}
 		e.function = QUICKKEY_MENUVALUE(MENU_GENERAL, MENU_GENERAL_OPTIONS_GPS_ENTRY_NUMBER, FUNC_RIGHT);
 		sendEvent = true;
