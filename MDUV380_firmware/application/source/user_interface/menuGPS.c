@@ -270,7 +270,16 @@ typedef struct
 	int16_t altM;  /* altitude above MSL in metres       */
 } gpsWaypoint_t;
 
-/* CCMRAM — does not persist across power cycles */
+/* CCMRAM — does not persist across power cycles.  The waypoint array is the
+ * big consumer (288 bytes for 16 entries) so we put it in CCM to keep .bss
+ * RAM free.  Existing CCM consumers (melody_generic, ambeData, etc.) only
+ * use the area as scratch — they always write before read — so a CCM section
+ * that isn't zero-initialised by startup is fine for them.
+ *
+ * The small state ints below stay in .bss precisely because they NEED to be
+ * zero at boot (otherwise s_wayptCount could be garbage > 0 and we'd dance
+ * on phantom waypoints).  6 bytes of RAM is a fair price for guaranteed
+ * initialisation.  Before reading s_waypoints[i], always check i < s_wayptCount. */
 static __attribute__((section(".ccmram"))) gpsWaypoint_t s_waypoints[GPS_WAYPOINT_MAX];
 static uint8_t  s_wayptCount     = 0;    /* number of saved waypoints    */
 static int16_t  s_wayptSelected  = 0;    /* 0-based highlighted index    */
@@ -281,7 +290,10 @@ static menuStatus_t menuGPSExitCode = MENU_STATUS_SUCCESS;
 static uint8_t prevGPSState = 0xff;
 static uint32_t updateTick = 0;
 static uint16_t prevSatsInView = 0xFFFF;
-static char directions[16][4];
+/* directions[] moved to CCMRAM — 64 bytes of RAM saved.  Written once at
+ * menuGPS() first-run init from currentLanguageGetSymbol(); read on every
+ * PAGE_DIRECTION redraw.  No interrupt access, safe in CCM. */
+static __attribute__((section(".ccmram"))) char directions[16][4];
 
 menuStatus_t menuGPS(uiEvent_t *ev, bool isFirstRun)
 {

@@ -51,6 +51,9 @@
 #include "interfaces/settingsStorage.h"
 #include "interfaces/adc.h"
 #include "functions/rxPowerSaving.h"
+#include "functions/trx.h"
+#include "functions/sound.h"
+#include "io/LEDs.h"
 
 #if defined(USING_EXTERNAL_DEBUGGER)
 #include "SeggerRTT/RTT/SEGGER_RTT.h"
@@ -73,6 +76,33 @@ bool spiFlashInitHasFailed = false;
 #if ! defined(PLATFORM_GD77S)
 ticksTimer_t autolockTimer;
 #endif
+
+/* -----------------------------------------------------------------------
+ * Call signal (SK1 + SK2 + PTT)
+ *
+ * When the operator presses SK1+SK2 while pulling PTT in FM/analog mode,
+ * the radio keys up and plays the MELODY_POWER_ON tone sequence over TX
+ * (instead of a voice transmission).  Used as an audible "calling tone"
+ * before voice — same tones the radio chimes at power-on so it is
+ * instantly recognisable on the receiving end.
+ *
+ * The state machine is driven from the 1 ms main-loop tick.  It steps
+ * through (freq, duration_ms) pairs, calling trxSetTone1() for each,
+ * which routes the AT1846's tone-1 generator to the TX modulator and
+ * mutes the microphone.  Releasing PTT or reaching the melody terminator
+ * (-1, -1) unkeys the transmitter and restores the mic path.
+ *
+ * Restricted to RADIO_MODE_ANALOG — DMR / M17 voice frames cannot carry
+ * a free-running audio tone, so the chord is ignored in those modes
+ * and the user gets normal voice TX instead.
+ * ----------------------------------------------------------------------- */
+/* Call-signal state — kept in .bss (not CCM) so the C runtime zero-inits
+ * s_callSigActive at boot.  If it were CCM and happened to start non-zero,
+ * the first 1 ms tick after power-on would think a call signal was already
+ * in progress and try to step through MELODY_POWER_ON with a garbage idx. */
+static bool     s_callSigActive    = false;
+static int      s_callSigMelodyIdx = 0;
+static uint32_t s_callSigNextEdgeMs = 0;
 
 
 #if (__NVIC_PRIO_BITS != 3)
@@ -770,6 +800,26 @@ void applicationMainTask(void)
 
 		if (keypadLocked || PTTLocked)
 		{
+			/* Explicit: LEFT/RIGHT and rotary navigation (KEY_ROTARY_INCREMENT/
+			 * DECREMENT) and the FRONT_UP/DOWN side-channel buttons are blocked
+			 * whenever keypadLocked is true — including when PTT is held.
+			 * Without this extra block, the outer `else if (PTTLocked)` branch
+			 * below would let navigation keys through during a TX hold.
+			 * The lock screen is pushed (showing the "keypad locked" warning)
+			 * for any of these keys exactly like the digit/letter keys. */
+			if (keypadLocked && (key_event == EVENT_KEY_CHANGE) && (syntheticEvent == false) &&
+			    ((keys.key == KEY_LEFT) || (keys.key == KEY_RIGHT) ||
+			     (keys.key == KEY_ROTARY_INCREMENT) || (keys.key == KEY_ROTARY_DECREMENT) ||
+			     (keys.key == KEY_FRONT_UP) || (keys.key == KEY_FRONT_DOWN)))
+			{
+				if ((PTTToggledDown == false) && (menuSystemGetCurrentMenuNumber() != UI_LOCK_SCREEN))
+				{
+					menuSystemPushNewMenu(UI_LOCK_SCREEN);
+				}
+				key_event = EVENT_KEY_NONE;
+				keys.key = 0;
+			}
+
 			if (keypadLocked && ((buttons & BUTTON_PTT) == 0))
 			{
 				if ((key_event == EVENT_KEY_CHANGE) && (syntheticEvent == false))
@@ -1020,7 +1070,34 @@ void applicationMainTask(void)
 			{
 				int currentMenu = menuSystemGetCurrentMenuNumber();
 
-				if ((trxGetMode() != RADIO_MODE_NONE) &&
+				/* Call signal chord: SK1+SK2+PTT in FM/analog mode keys up TX
+				 * and steps through MELODY_POWER_ON via the 1 ms tick block
+				 * further down.  We DO NOT push UI_TX_SCREEN — voice TX is
+				 * suppressed; only the tone1 generator drives the modulator.
+				 *
+				 * NOTE: BUTTON_PTT is NOT cleared from `buttons` here — the tick
+				 * block below uses (buttons & BUTTON_PTT) == 0 as its abort
+				 * condition (PTT release).  The `else if` chain ahead means the
+				 * normal UI_TX_SCREEN push path is already skipped. */
+				if (!s_callSigActive &&
+				    (buttons & BUTTON_SK1) && (buttons & BUTTON_SK2) &&
+				    (trxGetMode() == RADIO_MODE_ANALOG) &&
+				    (currentChannelData != NULL) && (currentChannelData->txFreq != 0) &&
+				    (settingsUsbMode != USB_MODE_HOTSPOT) &&
+				    (currentMenu != UI_POWER_OFF) && (currentMenu != UI_SPLASH_SCREEN) &&
+				    (currentMenu != UI_TX_SCREEN) && (currentMenu != MENU_CALIBRATION))
+				{
+					/* Initialise state first, set the flag LAST so the tick
+					 * never sees a partially-initialised state machine. */
+					s_callSigMelodyIdx  = 2; /* first pair consumed below */
+					s_callSigNextEdgeMs = ticksGetMillis() + (uint32_t)MELODY_POWER_ON[1];
+					LedWrite(LED_GREEN, 0);
+					LedWrite(LED_RED, 1);
+					trxEnableTransmission();
+					trxSetTone1(MELODY_POWER_ON[0]);
+					s_callSigActive = true;
+				}
+				else if ((trxGetMode() != RADIO_MODE_NONE) &&
 						(settingsUsbMode != USB_MODE_HOTSPOT) &&
 						(currentMenu != UI_POWER_OFF) &&
 						(currentMenu != UI_SPLASH_SCREEN) &&
@@ -1367,6 +1444,31 @@ void applicationMainTask(void)
 
 		voicePromptsTick();
 		soundTickMelody();
+
+		/* Call signal tick: advance MELODY_POWER_ON through trxSetTone1.
+		 * Aborts only when the operator releases PTT (SK1/SK2 may be
+		 * released once the chord is recognised — typical "hold PTT to
+		 * keep transmitting" feel).  The end-of-melody (-1, -1) sentinel
+		 * also tears down TX. */
+		if (s_callSigActive)
+		{
+			if (((buttons & BUTTON_PTT) == 0) ||
+			    (MELODY_POWER_ON[s_callSigMelodyIdx] == -1))
+			{
+				trxSetTone1(0);          /* tone1 off, mic path restored */
+				trxActivateRx(true);     /* unkey TX                     */
+				LedWrite(LED_RED, 0);
+				s_callSigActive = false;
+			}
+			else if ((int32_t)(ticksGetMillis() - s_callSigNextEdgeMs) >= 0)
+			{
+				trxSetTone1(MELODY_POWER_ON[s_callSigMelodyIdx]);
+				s_callSigNextEdgeMs = ticksGetMillis() +
+				                      (uint32_t)MELODY_POWER_ON[s_callSigMelodyIdx + 1];
+				s_callSigMelodyIdx += 2;
+			}
+		}
+
 		voxTick();
 		gpsTick();
 		aprsBeaconingTick(&ev);
