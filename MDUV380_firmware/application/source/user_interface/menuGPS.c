@@ -31,6 +31,8 @@
 #include "user_interface/uiLocalisation.h"
 #include "interfaces/gps.h"
 #include "usb/usb_com.h"
+#include <math.h>
+#include "functions/sound.h"
 
 #if defined(HAS_GPS)
 
@@ -221,6 +223,7 @@ typedef enum
 #if defined(PLATFORM_MD9600) || defined(CPU_MK22FN512VLL12)
 	PAGE_DIRECTION_2, // Heading/Course
 #endif
+	PAGE_WAYPOINTS,   /* saved GPS waypoints list */
 	PAGES_MAX
 } Pages_t;
 
@@ -249,11 +252,48 @@ typedef enum
 	FIXTYPE_3D    = (1 << 4),
 } DirectionFixtype_t;
 
+/*
+ * -----------------------------------------------------------------------
+ * Waypoint storage (PAGE_WAYPOINTS)
+ *
+ * Up to GPS_WAYPOINT_MAX points are stored in CCMRAM (volatile — lost
+ * on power-off).  Point indices are 1-based in the UI (P01 … P16).
+ * Distances shown are great-circle km from P01 (the reference point).
+ * -----------------------------------------------------------------------
+ */
+#define GPS_WAYPOINT_MAX   16
+
+typedef struct
+{
+	double  lat;   /* decimal degrees, positive = North */
+	double  lon;   /* decimal degrees, positive = East  */
+	int16_t altM;  /* altitude above MSL in metres       */
+} gpsWaypoint_t;
+
+/* CCMRAM — does not persist across power cycles.  The waypoint array is the
+ * big consumer (288 bytes for 16 entries) so we put it in CCM to keep .bss
+ * RAM free.  Existing CCM consumers (melody_generic, ambeData, etc.) only
+ * use the area as scratch — they always write before read — so a CCM section
+ * that isn't zero-initialised by startup is fine for them.
+ *
+ * The small state ints below stay in .bss precisely because they NEED to be
+ * zero at boot (otherwise s_wayptCount could be garbage > 0 and we'd dance
+ * on phantom waypoints).  6 bytes of RAM is a fair price for guaranteed
+ * initialisation.  Before reading s_waypoints[i], always check i < s_wayptCount. */
+static __attribute__((section(".ccmram"))) gpsWaypoint_t s_waypoints[GPS_WAYPOINT_MAX];
+static uint8_t  s_wayptCount     = 0;    /* number of saved waypoints    */
+static int16_t  s_wayptSelected  = 0;    /* 0-based highlighted index    */
+static int16_t  s_wayptScrollTop = 0;    /* 0-based index of top visible */
+static bool     s_wayptDetail    = false; /* true = detail view open      */
+
 static menuStatus_t menuGPSExitCode = MENU_STATUS_SUCCESS;
 static uint8_t prevGPSState = 0xff;
 static uint32_t updateTick = 0;
 static uint16_t prevSatsInView = 0xFFFF;
-static char directions[16][4];
+/* directions[] moved to CCMRAM — 64 bytes of RAM saved.  Written once at
+ * menuGPS() first-run init from currentLanguageGetSymbol(); read on every
+ * PAGE_DIRECTION redraw.  No interrupt access, safe in CCM. */
+static __attribute__((section(".ccmram"))) char directions[16][4];
 
 menuStatus_t menuGPS(uiEvent_t *ev, bool isFirstRun)
 {
@@ -989,6 +1029,174 @@ static bool displayCoords(bool isFirstRun, bool forceRedraw)
 	return false;
 }
 
+/* -----------------------------------------------------------------------
+ * Waypoint helper functions
+ * ----------------------------------------------------------------------- */
+
+/* Haversine great-circle distance in km. */
+static float wayptHaversineKm(double lat1d, double lon1d, double lat2d, double lon2d)
+{
+	const float R  = 6371.0f;
+	float dLat = (float)((lat2d - lat1d) * (M_PI / 180.0));
+	float dLon = (float)((lon2d - lon1d) * (M_PI / 180.0));
+	float lat1 = (float)(lat1d * (M_PI / 180.0));
+	float lat2 = (float)(lat2d * (M_PI / 180.0));
+	float sl   = sinf(dLat * 0.5f);
+	float sm   = sinf(dLon * 0.5f);
+	float a    = sl * sl + cosf(lat1) * cosf(lat2) * sm * sm;
+	return R * 2.0f * atan2f(sqrtf(a), sqrtf(1.0f - a));
+}
+
+/* Format a decimal-degree coordinate as "52.1234N" (lat) or "004.5678E" (lon).
+ * buf must be at least 11 bytes. */
+static void wayptFmtCoord(char *buf, size_t bufLen, double deg, bool isLat)
+{
+	double absDeg = fabs(deg);
+	int    intDeg = (int)absDeg;
+	int    frac   = (int)((absDeg - intDeg) * 10000.0 + 0.5);
+	char   hemi   = isLat ? (deg >= 0.0 ? 'N' : 'S') : (deg >= 0.0 ? 'E' : 'W');
+
+	if (isLat)
+		snprintf(buf, bufLen, "%02d.%04d%c", intDeg, frac, hemi);
+	else
+		snprintf(buf, bufLen, "%03d.%04d%c", intDeg, frac, hemi);
+}
+
+/* Format a distance (km, float) into buf WITHOUT using %f (not supported by
+ * newlib-nano without -u _printf_float).  prefix is "P%02d  " or "D: ". */
+static void wayptSnprintDist(char *buf, size_t bufLen, const char *prefix, float d)
+{
+	/* Work in units of 1/100 km to avoid %f entirely. */
+	int dm = (int)(d * 100.0f + 0.5f);
+	if (dm < 1000)                               /* 0.00 – 9.99 km  */
+		snprintf(buf, bufLen, "%s%d.%02dkm", prefix, dm / 100, dm % 100);
+	else if (dm < 10000)                         /* 10.0 – 99.9 km  */
+		snprintf(buf, bufLen, "%s%d.%dkm",   prefix, dm / 100, (dm % 100) / 10);
+	else                                         /* 100+ km         */
+		snprintf(buf, bufLen, "%s%dkm",      prefix, dm / 100);
+}
+
+/* Keep s_wayptSelected and s_wayptScrollTop within valid bounds. */
+static void wayptClampScroll(void)
+{
+	int visible = MENU_MAX_DISPLAYED_ENTRIES;
+
+	if (s_wayptCount == 0)
+	{
+		s_wayptSelected  = 0;
+		s_wayptScrollTop = 0;
+		return;
+	}
+
+	if (s_wayptSelected >= (int16_t)s_wayptCount)
+		s_wayptSelected = (int16_t)(s_wayptCount - 1);
+	if (s_wayptSelected < 0)
+		s_wayptSelected = 0;
+
+	if (s_wayptSelected < s_wayptScrollTop)
+		s_wayptScrollTop = s_wayptSelected;
+	if (s_wayptSelected >= s_wayptScrollTop + visible)
+		s_wayptScrollTop = (int16_t)(s_wayptSelected - visible + 1);
+	if (s_wayptScrollTop < 0)
+		s_wayptScrollTop = 0;
+}
+
+/* Render the waypoints page (list view or detail view).
+ * Returns true when the display was updated. */
+static bool displayWaypoints(bool isFirstRun, bool forceRedraw)
+{
+	if (!(isFirstRun || forceRedraw))
+		return false;
+
+	/* Clear body area below the title bar. */
+	displayFillRect(0, 16, DISPLAY_SIZE_X, DISPLAY_SIZE_Y - 16, true);
+
+	wayptClampScroll();
+
+	/* ---- Detail view ---- */
+	if (s_wayptDetail && s_wayptCount > 0)
+	{
+		const gpsWaypoint_t *pt = &s_waypoints[s_wayptSelected];
+		char latBuf[12], lonBuf[12], buf[20];
+
+		wayptFmtCoord(latBuf, sizeof(latBuf), pt->lat, true);
+		wayptFmtCoord(lonBuf, sizeof(lonBuf), pt->lon, false);
+
+		snprintf(buf, sizeof(buf), "Point %d", s_wayptSelected + 1);
+		displayPrintAt(DISPLAY_X_POS_MENU_TEXT_OFFSET, 16, buf, FONT_SIZE_3);
+		displayPrintAt(DISPLAY_X_POS_MENU_TEXT_OFFSET, 32, latBuf, FONT_SIZE_3);
+		displayPrintAt(DISPLAY_X_POS_MENU_TEXT_OFFSET, 48, lonBuf, FONT_SIZE_3);
+
+		snprintf(buf, sizeof(buf), "Alt: %dm", (int)pt->altM);
+		displayPrintAt(DISPLAY_X_POS_MENU_TEXT_OFFSET, 64, buf, FONT_SIZE_3);
+
+		if (s_wayptSelected > 0 && s_wayptCount > 1)
+		{
+			float d = wayptHaversineKm(s_waypoints[0].lat, s_waypoints[0].lon,
+			                           pt->lat, pt->lon);
+			wayptSnprintDist(buf, sizeof(buf), "D: ", d);
+		}
+		else
+		{
+			snprintf(buf, sizeof(buf), "D: ref.");
+		}
+		displayPrintAt(DISPLAY_X_POS_MENU_TEXT_OFFSET, 80, buf, FONT_SIZE_3);
+
+		return true;
+	}
+
+	/* ---- List view ---- */
+	if (s_wayptCount == 0)
+	{
+		displayPrintCentered(52, "No waypoints", FONT_SIZE_3);
+		displayPrintCentered(72, "* to save fix", FONT_SIZE_1_BOLD);
+		return true;
+	}
+
+	int visible = MENU_MAX_DISPLAYED_ENTRIES;
+
+	for (int row = 0; row < visible; row++)
+	{
+		int  idx  = s_wayptScrollTop + row;
+		int  yPos = 16 + row * MENU_ENTRY_HEIGHT;
+		char buf[20];
+		bool sel  = (idx == (int)s_wayptSelected);
+
+		if (idx >= (int)s_wayptCount)
+			break;
+
+		if (sel)
+		{
+			displayThemeApply(THEME_ITEM_BG_MENU_ITEM_SELECTED, THEME_ITEM_BG);
+			displayFillRoundRect(DISPLAY_X_POS_MENU_OFFSET, yPos,
+			                     DISPLAY_SIZE_X - (DISPLAY_X_POS_MENU_OFFSET * 2),
+			                     MENU_ENTRY_HEIGHT, 2, true);
+		}
+
+		displayThemeApply(THEME_ITEM_FG_MENU_ITEM, THEME_ITEM_BG);
+
+		/* "P01  ref." for the reference point, "P02  1.23km" for others. */
+		if (idx == 0 || s_wayptCount == 1)
+		{
+			snprintf(buf, sizeof(buf), "P%02d  ref.", idx + 1);
+		}
+		else
+		{
+			char prefix[8];
+			snprintf(prefix, sizeof(prefix), "P%02d  ", idx + 1);
+			float d = wayptHaversineKm(s_waypoints[0].lat, s_waypoints[0].lon,
+			                           s_waypoints[idx].lat, s_waypoints[idx].lon);
+			wayptSnprintDist(buf, sizeof(buf), prefix, d);
+		}
+
+		displayPrintCore(DISPLAY_X_POS_MENU_TEXT_OFFSET, yPos, buf,
+		                 FONT_SIZE_3, TEXT_ALIGN_LEFT, sel);
+		displayThemeResetToDefault();
+	}
+
+	return true;
+}
+
 static bool displayGPSData(bool isFirstRun, bool forceRedraw)
 {
 	char buffer[SCREEN_LINE_BUFFER_SIZE];
@@ -1020,6 +1228,10 @@ static bool displayGPSData(bool isFirstRun, bool forceRedraw)
 			case PAGE_DIRECTION_2:
 #endif
 				res = displayDirectionInfo(isFirstRun, forceRedraw);
+				break;
+
+			case PAGE_WAYPOINTS:
+				res = displayWaypoints(isFirstRun, forceRedraw);
 				break;
 
 			case PAGES_MAX:
@@ -1253,7 +1465,22 @@ static void handleEvent(uiEvent_t *ev)
 
 	if (KEYCHECK_SHORTUP(ev->keys, KEY_UP))
 	{
-		if (menuDataGlobal.currentItemIndex > PAGE_COORDS)
+		if (menuDataGlobal.currentItemIndex == PAGE_WAYPOINTS && !s_wayptDetail)
+		{
+			/* Scroll list up; navigate to previous page when at the top. */
+			if (s_wayptCount > 0 && s_wayptSelected > 0)
+			{
+				s_wayptSelected--;
+				wayptClampScroll();
+				isDirty = true;
+			}
+			else if (menuDataGlobal.currentItemIndex > PAGE_COORDS)
+			{
+				menuDataGlobal.currentItemIndex--;
+				isDirty = true;
+			}
+		}
+		else if (menuDataGlobal.currentItemIndex > PAGE_COORDS)
 		{
 			menuDataGlobal.currentItemIndex--;
 			isDirty = true;
@@ -1261,11 +1488,28 @@ static void handleEvent(uiEvent_t *ev)
 	}
 	else if (KEYCHECK_SHORTUP(ev->keys, KEY_DOWN))
 	{
-		if (menuDataGlobal.currentItemIndex < (PAGES_MAX - 1))
+		if (menuDataGlobal.currentItemIndex == PAGE_WAYPOINTS && !s_wayptDetail)
+		{
+			/* Scroll list down; do nothing when at the last waypoint. */
+			if (s_wayptCount > 0 && s_wayptSelected < (int16_t)(s_wayptCount - 1))
+			{
+				s_wayptSelected++;
+				wayptClampScroll();
+				isDirty = true;
+			}
+		}
+		else if (menuDataGlobal.currentItemIndex < (PAGES_MAX - 1))
 		{
 			menuDataGlobal.currentItemIndex++;
 			isDirty = true;
 		}
+	}
+	/* GREEN (no SK2) on waypoints page: toggle detail view for the selected point. */
+	else if (KEYCHECK_SHORTUP(ev->keys, KEY_GREEN) && !BUTTONCHECK_DOWN(ev, BUTTON_SK2) &&
+	         menuDataGlobal.currentItemIndex == PAGE_WAYPOINTS && s_wayptCount > 0)
+	{
+		s_wayptDetail = !s_wayptDetail;
+		isDirty = true;
 	}
 	else if ((KEYCHECK_SHORTUP(ev->keys, KEY_GREEN) && BUTTONCHECK_DOWN(ev, BUTTON_SK2))
 #if defined(PLATFORM_MD9600) || defined(CPU_MK22FN512VLL12)
@@ -1282,7 +1526,58 @@ static void handleEvent(uiEvent_t *ev)
 	}
 	else if (KEYCHECK_SHORTUP(ev->keys, KEY_RED))
 	{
-		menuSystemPopPreviousMenu();
+		/* RED in detail view → go back to list. RED in list → exit GPS menu. */
+		if (menuDataGlobal.currentItemIndex == PAGE_WAYPOINTS && s_wayptDetail)
+		{
+			s_wayptDetail = false;
+			isDirty = true;
+		}
+		else
+		{
+			menuSystemPopPreviousMenu();
+		}
+	}
+	/* STAR: save current GPS fix as the next sequentially numbered waypoint. */
+	else if (KEYCHECK_SHORTUP(ev->keys, KEY_STAR) &&
+	         menuDataGlobal.currentItemIndex == PAGE_WAYPOINTS)
+	{
+		if ((gpsData.Status & (GPS_STATUS_HAS_FIX | GPS_STATUS_HAS_POSITION)) !=
+		    (GPS_STATUS_HAS_FIX | GPS_STATUS_HAS_POSITION))
+		{
+			soundSetMelody(MELODY_NACK_BEEP); /* no valid fix yet */
+		}
+		else if (s_wayptCount >= GPS_WAYPOINT_MAX)
+		{
+			soundSetMelody(MELODY_NACK_BEEP); /* storage full */
+		}
+		else
+		{
+			gpsWaypoint_t *wp = &s_waypoints[s_wayptCount];
+			wp->lat  = gpsData.LatitudeHiRes;
+			wp->lon  = gpsData.LongitudeHiRes;
+			wp->altM = gpsData.HeightInM;
+			s_wayptCount++;
+			s_wayptSelected = (int16_t)(s_wayptCount - 1);
+			s_wayptDetail   = false;
+			wayptClampScroll();
+			soundSetMelody(MELODY_ACK_BEEP);
+			isDirty = true;
+		}
+	}
+	/* HASH long-press: delete the selected waypoint and compact the array. */
+	else if (KEYCHECK_LONGDOWN(ev->keys, KEY_HASH) &&
+	         menuDataGlobal.currentItemIndex == PAGE_WAYPOINTS &&
+	         !s_wayptDetail && s_wayptCount > 0)
+	{
+		int del = (int)s_wayptSelected;
+		for (int i = del; i < (int)(s_wayptCount - 1); i++)
+		{
+			s_waypoints[i] = s_waypoints[i + 1];
+		}
+		s_wayptCount--;
+		wayptClampScroll();
+		soundSetMelody(MELODY_KEY_BEEP);
+		isDirty = true;
 	}
 	else if (KEYCHECK_SHORTUP_NUMBER(ev->keys) && (BUTTONCHECK_DOWN(ev, BUTTON_SK2)))
 	{

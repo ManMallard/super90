@@ -77,10 +77,12 @@ void enc_indicator_render(void)
     {
         /* Assigned slot is empty — audio transmits IN THE CLEAR.
          * Show warning ONLY while PTT is pressed (trxTransmissionEnabled).
-         * Position: one font row (8 px) below the talk-group / contact line
-         * so it reads: TOT timer → TG number → ENC warning → channel name. */
+         * Position: one font row (8 px) below the talk-group / contact line,
+         * shifted right by 4 char-cells (24 px @ 6 px/char) and down 5 px,
+         * so it sits clear of the TG number on the left and reads:
+         *   TOT timer → TG number → ENC warning → channel name. */
         if (trxTransmissionEnabled) {
-            displayPrintAt(0, DISPLAY_Y_POS_CONTACT_TX + 8, "ENC ACTIVE NO KEY NO ENC", FONT_SIZE_1);
+            displayPrintAt(24, DISPLAY_Y_POS_CONTACT_TX + 13, "ENC ACTIVE NO KEY NO ENC", FONT_SIZE_1);
         }
         goto end_no_warn;
     }
