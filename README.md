@@ -66,7 +66,7 @@ If flashing fails or behaves unexpectedly, you will need the backup to recover y
 
 ## Key Features vs OpenGD77
 
-### What's Added (Johnny Bravo Enhancements)
+### What's Added
 1. **AES-256-CTR Encryption**
    - 16-slot key bank with passphrase (T9 multi-tap) or direct hex key entry
    - Per-channel encryption key selection
