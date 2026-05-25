@@ -78,23 +78,32 @@ ticksTimer_t autolockTimer;
 #endif
 
 /* -----------------------------------------------------------------------
- * Call signal (SK1 + SK2 + PTT)
+ * Call signal (PTT held → tap SK1)
  *
- * When the operator presses SK1+SK2 while pulling PTT in FM/analog mode,
- * the radio keys up and plays the MELODY_POWER_ON tone sequence over TX
- * (instead of a voice transmission).  Used as an audible "calling tone"
- * before voice — same tones the radio chimes at power-on so it is
- * instantly recognisable on the receiving end.
+ * The radio must already be transmitting in FM/analog mode (operator
+ * holding PTT — voice TX is live and UI_TX_SCREEN is on top).  Tapping
+ * SK1 in that state mid-transmission switches the modulation source from
+ * the mic to the AT1846 tone-1 generator and plays the MELODY_POWER_ON
+ * sequence — an audible "calling tone" right inside the same TX, same
+ * tones the radio chimes at power-on so it is instantly recognisable on
+ * the receiving end.
  *
  * The state machine is driven from the 1 ms main-loop tick.  It steps
  * through (freq, duration_ms) pairs, calling trxSetTone1() for each,
- * which routes the AT1846's tone-1 generator to the TX modulator and
- * mutes the microphone.  Releasing PTT or reaching the melody terminator
- * (-1, -1) unkeys the transmitter and restores the mic path.
+ * which routes tone-1 to the TX modulator and mutes the microphone.
+ *
+ * Teardown is split:
+ *   - melody terminator reached, PTT still down  → restore mic path
+ *     (trxSetTone1(0)) so the operator continues normal voice TX.
+ *     TX stays keyed, UI_TX_SCREEN stays up.
+ *   - PTT released (with or without melody finished) → restore mic path
+ *     AND unkey TX (trxActivateRx(true)).  UI_TX_SCREEN's own PTT-release
+ *     handler also tears down voice TX; both calls are idempotent.
+ * This is what guarantees the PTT unlatches correctly even if SK1 is
+ * still held.
  *
  * Restricted to RADIO_MODE_ANALOG — DMR / M17 voice frames cannot carry
- * a free-running audio tone, so the chord is ignored in those modes
- * and the user gets normal voice TX instead.
+ * a free-running audio tone, so the trigger is ignored in those modes.
  * ----------------------------------------------------------------------- */
 /* Call-signal state — kept in .bss (not CCM) so the C runtime zero-inits
  * s_callSigActive at boot.  If it were CCM and happened to start non-zero,
@@ -1070,40 +1079,30 @@ void applicationMainTask(void)
 			{
 				int currentMenu = menuSystemGetCurrentMenuNumber();
 
-				/* Call signal chord: SK1+SK2+PTT in FM/analog mode keys up TX
-				 * and steps through MELODY_POWER_ON via the 1 ms tick block
-				 * further down.  We DO NOT push UI_TX_SCREEN — voice TX is
-				 * suppressed; only the tone1 generator drives the modulator.
+				/* Call signal: while PTT is held in FM/analog mode, pressing SK1
+				 * diverts the modulator from mic to MELODY_POWER_ON (driven by
+				 * the 1 ms tick block further down).  TX is ALREADY keyed by
+				 * the normal PTT path — we do NOT call trxEnableTransmission()
+				 * again here; we just retarget the AT1846 voice channel.
 				 *
-				 * NOTE: BUTTON_PTT is NOT cleared from `buttons` here — the tick
-				 * block below uses (buttons & BUTTON_PTT) == 0 as its abort
-				 * condition (PTT release).  The `else if` chain ahead means the
-				 * normal UI_TX_SCREEN push path is already skipped. */
+				 * UI_TX_SCREEN is intentionally NOT in the exclusion list — the
+				 * whole point is to trigger mid-transmission.  BUTTON_PTT is NOT
+				 * cleared from `buttons`; the tick block uses (buttons & PTT) == 0
+				 * as its full-teardown signal. */
 				if (!s_callSigActive &&
-				    (buttons & BUTTON_SK1) && (buttons & BUTTON_SK2) &&
+				    (buttons & BUTTON_SK1) &&
 				    (trxGetMode() == RADIO_MODE_ANALOG) &&
 				    (currentChannelData != NULL) && (currentChannelData->txFreq != 0) &&
 				    (settingsUsbMode != USB_MODE_HOTSPOT) &&
 				    (currentMenu != UI_POWER_OFF) && (currentMenu != UI_SPLASH_SCREEN) &&
-				    (currentMenu != UI_TX_SCREEN) && (currentMenu != MENU_CALIBRATION))
+				    (currentMenu != MENU_CALIBRATION))
 				{
 					/* Wake the radio fully out of eco/power-save BEFORE touching
-					 * the AT1846 / HR-C6000.  This mirrors what the normal PTT
-					 * path does (see rxPowerSavingSetState() call further down
-					 * in the else-if block) and is what was previously missing
-					 * from the call-signal path.
-					 *
-					 * Why it matters: with "all sounds off" (audioPromptMode ==
-					 * AUDIO_PROMPT_MODE_SILENT) the eco state machine spends
-					 * more time in deep sleep because there is no beep traffic
-					 * keeping the audio peripherals warm.  In that state, going
-					 * straight to trxEnableTransmission()/trxSetTone1() writes
-					 * the AT1846 tone-1 register against a half-powered chip
-					 * and the modulator never carries the tone — i.e. the call
-					 * signal silently fails.  With sounds enabled the peripheral
-					 * is usually already awake from a recent key beep, which is
-					 * why the chord appears to "work when sounds are on but not
-					 * when they're off". */
+					 * the AT1846 / HR-C6000.  Required when "all sounds off"
+					 * (audioPromptMode == AUDIO_PROMPT_MODE_SILENT) lets the eco
+					 * state machine sleep deep between events; without this,
+					 * tone-1 register writes can land on a half-powered chip
+					 * and never reach the modulator. */
 					rxPowerSavingSetState(ECOPHASE_POWERSAVE_INACTIVE);
 
 					/* Defensive: kill any in-flight beep melody so the audio
@@ -1115,12 +1114,12 @@ void applicationMainTask(void)
 					}
 
 					/* Initialise state first, set the flag LAST so the tick
-					 * never sees a partially-initialised state machine. */
+					 * never sees a partially-initialised state machine.
+					 * TX is already keyed by the normal PTT path (UI_TX_SCREEN
+					 * is up), so we deliberately do NOT call
+					 * trxEnableTransmission() here — that would double-key. */
 					s_callSigMelodyIdx  = 2; /* first pair consumed below */
 					s_callSigNextEdgeMs = ticksGetMillis() + (uint32_t)MELODY_POWER_ON[1];
-					LedWrite(LED_GREEN, 0);
-					LedWrite(LED_RED, 1);
-					trxEnableTransmission();
 					trxSetTone1(MELODY_POWER_ON[0]);
 					s_callSigActive = true;
 				}
@@ -1473,18 +1472,30 @@ void applicationMainTask(void)
 		soundTickMelody();
 
 		/* Call signal tick: advance MELODY_POWER_ON through trxSetTone1.
-		 * Aborts only when the operator releases PTT (SK1/SK2 may be
-		 * released once the chord is recognised — typical "hold PTT to
-		 * keep transmitting" feel).  The end-of-melody (-1, -1) sentinel
-		 * also tears down TX. */
+		 * Two distinct end conditions, intentionally handled differently:
+		 *
+		 *   PTT released  → restore mic AND unkey TX.  This is what makes
+		 *                   the PTT latch release correctly even if SK1 is
+		 *                   still held.  UI_TX_SCREEN's own PTT-release
+		 *                   handler also tears down voice TX; both calls
+		 *                   are idempotent (second trxActivateRx is a no-op).
+		 *
+		 *   Melody done, PTT still down → restore mic ONLY.  TX stays keyed
+		 *                                 and the operator continues normal
+		 *                                 voice transmission seamlessly. */
 		if (s_callSigActive)
 		{
-			if (((buttons & BUTTON_PTT) == 0) ||
-			    (MELODY_POWER_ON[s_callSigMelodyIdx] == -1))
+			bool pttReleased = ((buttons & BUTTON_PTT) == 0);
+			bool melodyDone  = (MELODY_POWER_ON[s_callSigMelodyIdx] == -1);
+
+			if (pttReleased || melodyDone)
 			{
-				trxSetTone1(0);          /* tone1 off, mic path restored */
-				trxActivateRx(true);     /* unkey TX                     */
-				LedWrite(LED_RED, 0);
+				trxSetTone1(0);              /* tone1 off, mic path restored */
+				if (pttReleased)
+				{
+					trxActivateRx(true); /* unkey TX                     */
+					LedWrite(LED_RED, 0);
+				}
 				s_callSigActive = false;
 			}
 			else if ((int32_t)(ticksGetMillis() - s_callSigNextEdgeMs) >= 0)
