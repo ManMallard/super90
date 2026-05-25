@@ -1,153 +1,192 @@
 # OpenGD77 AES-256 Encryption Patch (STM32 / OpenMDUV380)
 
-Adds AES-256-CTR voice encryption to the OpenMDUV380 firmware that runs on
-the TYT MD-UV380 / MD-UV390 / MD-UV390 Plus, the Retevis RT-3S, and the
-Baofeng DM-1701 / Retevis RT-84.
+**Developer:** Johnny Bravo
 
-## What this gives you
+Adds AES-256-CTR voice encryption to the OpenMDUV380 firmware for the TYT MD-UV380 / MD-UV390 / MD-UV390 Plus, Retevis RT-3S, and Baofeng DM-1701 / Retevis RT-84.
 
-- A 16-slot key bank, accessed from a new top-level "Encryption Keys" menu
-  (shown as a duplicate "Credits" entry until a custom language string is
-  added — see "Polish" below).
-- Per-slot key entry by either:
-  - **T9 multi-tap passphrase** (PBKDF2-HMAC-SHA256, 4000 iterations)
-  - **64-character hex** (direct 32-byte key)
-- Per-channel encryption-key selector in **Channel details** ("Enc Key" row,
-  cycle 0..16 with LEFT/RIGHT keys).
-- "ENC" badge in the bottom-right of the main screen when an encrypted channel is active.
-- AES-256-CTR encrypt/decrypt on the 27-byte AMBE+2 voice frames as they
-  pass through the HR-C6000 SPI buffer.
+This patcher is used to apply encryption, M17 mode, and other enhancements to the official OpenGD77 MDUV380 firmware distribution. It integrates cleanly with the existing OpenGD77 source without modifying unrelated functionality.
 
-## What this does not do
+## What This Adds
 
-- **Bench testing only.** Encrypting voice on amateur frequencies is
-  prohibited in most jurisdictions. Use only on shielded test setups
-  (dummy loads, attenuators, screened rooms) or on FCC Part 90 / commercial
-  spectrum where you are licensed.
-- **No interop with TYT BP encryption.** This is a separate, stronger
-  scheme. Two radios with this patch can talk to each other; neither will
-  understand a plain TYT-encrypted transmission.
-- **No automatic key exchange.** You must pre-share the passphrase or hex
-  key out of band on every radio that will use a slot.
+### Encryption Features
+- **16-slot AES-256 key bank** with independent key management
+- **Two key entry methods:**
+  - T9 multi-tap passphrase (PBKDF2-HMAC-SHA256, 4000 iterations) — simple to remember
+  - Direct 64-character hexadecimal (256-bit) key entry
+- **Per-channel encryption control** — select which key (0–16) to use in Channel details
+- **Visual indicator:** "ENC" badge displays in bottom-right of main screen when encrypted channel is active
+- **Real-time crypto:** AES-256-CTR encrypt/decrypt runs on 27-byte AMBE+2 voice frames in the HR-C6000 SPI stream
+
+### Additional Features (Included in Full Build)
+- **M17 Digital Mode** — Open-source alternative to DMR, integrated into mode selector
+- **GPS Waypoints** — Track and save GPS coordinates with distance calculations
+- **UI & Memory Optimizations** — Bug fixes and flash/RAM optimizations
+
+## ⚠️ Critical Limitations & Legal Notice
+
+### Bench Testing Only
+**Encrypting voice on amateur radio frequencies is illegal in most jurisdictions** (USA, Canada, EU, and others). This implementation is for testing on:
+- Shielded test setups (dummy loads, attenuators, screened Faraday cages)
+- Commercial licensed spectrum where encryption is permitted (FCC Part 90, etc.)
+
+**Unauthorized use of encryption on amateur frequencies can result in:**
+- Heavy FCC fines ($10,000+)
+- Criminal prosecution
+- License revocation
+- Other civil/criminal penalties
+
+Users assume **all responsibility** for compliance with local regulations. Neither the developer nor OpenGD77 project provides any legal warranty or liability protection.
+
+### Encryption Limitations
+- **Not compatible with TYT BP encryption** — entirely separate cipher with different keys and implementation
+- **Two radios with this patch** can communicate with matching passphrases; neither will decode TYT-encrypted transmissions
+- **No automatic key exchange** — you must pre-share the passphrase or hex key out-of-band on every radio using a slot
+- **Nonce generation is software-based** and persistent across power cycles (suitable for testing; production deployments would use RNG peripheral for per-PTT nonces)
+
+## What Stays the Same
+
+This patcher **does not modify** core OpenGD77 functionality:
+- DMR mode and architecture remain unchanged
+- FM analog mode is unaffected
+- Hotspot mode works as in base OpenGD77
+- Codeplug system and zone/contact management are compatible
+- All OpenGD77 standard menus and UI paradigms are preserved
+- Flashing procedure is identical to standard OpenGD77
+
+The enhancements are additive — existing OpenGD77 users can apply this patch to gain new capabilities without losing any base functionality.
 
 ## Prerequisites
 
-- Windows 10 or 11
-- Python 3.9+ on PATH
-- STM32CubeIDE
-- The OpenMDUV380 source tree (extracted from the official `.zip` from
-  `opengd77.com`)
+- **Windows 10 or 11**
+- **Python 3.9+** (must be on system PATH)
+- **STM32CubeIDE 2.1+** — [download from st.com](https://www.st.com/en/development-tools/stm32cubeide.html)
+- **OpenGD77 MDUV380 source tree** — Extract the official `.zip` from [opengd77.com](https://opengd77.com) (do NOT git clone; use the official release `.zip`)
 
-## Apply
+## Apply the Patcher
+
+From the root of the sneaky390 repository:
 
 ```powershell
-powershell -ExecutionPolicy Bypass -File .\setup.ps1 `
-    -Repo C:\sneaky390-uv380\OpenGD77_MDUV380_DM1701_20260130
+powershell -ExecutionPolicy Bypass -File .\Patcher\setup.ps1 `
+    -Repo C:\path\to\OpenGD77_MDUV380_DM1701_YYYYMMDD
 ```
 
-The script will:
+Replace the path with your extracted OpenGD77 official source directory. Do not use a git clone; the patcher expects the official `.zip` distribution.
 
-1. Run `prepare.bat` to generate the AMBE codec placeholder
-   (`codec_bin_section_1.bin`).
-2. Copy `new_files/source/crypto/*.c` and `new_files/include/crypto/*.h`
-   into `MDUV380_firmware/application/{source,include}/crypto/`.
-3. Copy `menuKeyManagement.c` and `menuKeyEntry.c` into
-   `MDUV380_firmware/application/source/user_interface/`.
-4. Run `apply_mods.py`, which:
-   - Renames `_UNUSED_2` to `encKeyIndex` in `CodeplugChannel_t`.
-   - Inserts the encrypt/decrypt taps at three call sites in `HR-C6000.c`.
-   - Adds `MENU_KEY_MANAGEMENT` and `MENU_KEY_ENTRY` to the `MENU_SCREENS`
-     enum, with matching prototypes.
-   - Appends two rows to `menuFunctions[]` in `menuSystem.c` and one
-     entry to `mainMenuItems[]`.
-   - Adds the `CH_DETAILS_ENC_KEY` row to `menuChannelDetails.c`
-     (enum + render + LEFT + RIGHT handlers).
-   - Calls `enc_indicator_render()` from the main-screen header path.
-   - Patches `codec_interface.c` and `codec.h` to use `LDR/BLX` for the
-     AMBE codec calls instead of `BL <literal>`. This is required for
-     STM32CubeIDE 2.1+ (GCC 14.x) — older toolchains accepted the bare
-     `BL <literal>` form, but newer binutils rejects it as a "dangerous
-     relocation". Without this fix, the linker fails with
-     `Unknown destination type (ARM/Thumb)`.
+### What the Patcher Does
 
-Anything the patcher can't safely apply ends up in `AES_PATCH_TODO.md` at
-the repo root.
+1. **Generates AMBE placeholder** — Runs `prepare.bat` to create the codec stub (`codec_bin_section_1.bin`)
+2. **Copies encryption source** — Installs `crypto/*.c` and `crypto/*.h` files into the application directory
+3. **Adds UI files** — Copies key management menus (`menuKeyManagement.c`, `menuKeyEntry.c`)
+4. **Integrates changes** — Runs `apply_mods.py` to:
+   - Redefine unused codeplug fields for encryption key storage
+   - Insert encrypt/decrypt hooks into the HR-C6000 SPI stream (3 call sites)
+   - Register new menu screens and UI handlers
+   - Add the "Enc Key" row to channel details
+   - Display "ENC" indicator on the main screen
+   - **Fix GCC 14.x compatibility** — Converts `BL <literal>` AMBE codec calls to `LDR/BLX` form (required for STM32CubeIDE 2.1+)
+   - Add call to `enc_indicator_render()` to the main screen render loop
 
-## Build
+### Incomplete Patches
 
-**Before the first build, generate the AMBE codec placeholder.** The
-official source ships without the proprietary AMBE codec — it's spliced
-in by the CPS firmware loader at flash time. The build needs a
-zero-filled placeholder file in its place or the assembler errors out
-with `file not found: codec_bin_section_1.bin`.
+If `apply_mods.py` encounters sections it cannot safely modify, it outputs `AES_PATCH_TODO.md` at the repo root with manual instructions. This is rare but may occur if the upstream OpenGD77 source differs significantly from expected.
 
-From a Windows Command Prompt at the source root:
+## Build Instructions
 
-```cmd
-prepare.bat
-```
+See the [main README](../README.md) for complete build instructions, including prerequisites and troubleshooting.
 
-This calls `MDUV380_firmware\tools\codec_cleaner.exe -C` which writes a
-~298 KB placeholder to `MDUV380_firmware\application\source\linkerdata\`.
-You only need to do this once per fresh source extract. (`setup.ps1`
-runs it automatically.)
+### Quick Summary
 
-Then:
+1. Run `Patcher\setup.ps1` (see above) — this generates the AMBE placeholder and applies all patches
+2. Open STM32CubeIDE and load `MDUV380_firmware` folder
+3. **Project → Clean**, then **Project → Build Project**
+4. Output files (`.sgl`, `.bin`, `.elf`) appear in the build folder
 
-1. Open STM32CubeIDE.
-2. **File → Open Projects from File System →** select the
-   `MDUV380_firmware` folder.
-3. **Project → Clean…**, then **Project → Build Project**.
-4. The output is a `.bin` (and the post-build step packages a `.sgl`) in
-   the build configuration's folder.
+## ⚠️ Firmware Size Warning
 
-## Flash
+This patched firmware is **significantly larger than base OpenGD77** due to:
+- AES-256 cryptography library (~30 KB)
+- M17 digital mode and Codec2 (~150 KB)
+- Enhanced UI and menu system (~20 KB)
+- Additional features and optimizations
 
-1. Open the OpenGD77 CPS.
-2. Connect the radio in firmware-update mode.
-3. **Extras → Firmware Loader** (menu name varies by CPS version).
-4. Select the `.sgl` (or `.bin` plus the donor `.bin` if your CPS asks for
-   one).
-5. Wait for "Firmware update complete." Power-cycle the radio.
+**Verify your radio's flash layout** before flashing:
+- TYT MD-UV390: ~1 MB total flash; verify remaining space after firmware load
+- Older or budget variants may have less flash available
 
-## Verify
+If your radio runs out of storage after loading this firmware, user codeplug data may not fit. **Back up your existing firmware before flashing.**
 
-After power-on:
+## Flash to Radio
 
-1. **Menu** → scroll to a second "Credits" entry → opens 16-slot key list.
-2. Press **Green** on slot 1, enter a T9 passphrase like `TEST`, then
-   **Green** to commit. The slot now shows label "Slot 1".
-3. **Menu → Channel details** on a digital channel. Scroll to "Enc Key".
-   Press **Right** to set it to `1`. **Green** to confirm.
-4. The "ENC" badge should appear in the bottom-right of the main screen
-   when that channel is active.
-5. Repeat steps 1-3 on a second radio with the same passphrase on slot 1.
-6. Key up on radio A. Radio B should decode voice. Without matching keys,
-   radio B receives noise.
+1. Connect radio to PC via USB in **firmware-update mode**
+2. Open **OpenGD77 CPS** (Configuration Programming Software)
+3. **Extras → Firmware Loader**
+4. Select the `.sgl` output from the build
+5. (Some CPS versions require a donor `.bin` file as well)
+6. Click **Write** and wait for completion
+7. **Power cycle the radio**
 
-## Polish (optional, after the bench test works)
+## Verify Encryption Works
 
-- Add a real "Enc Keys" language string instead of reusing the index 2
-  ("Credits") slot. Requires a field in `uiLocalisation.h` and an entry
-  in every `.h` file under `application/include/user_interface/languages/`.
-- Tune `PBKDF2_ITERATIONS` in `kdf.h` if entry feels slow.
-- Replace the `dmr_crypto_make_nonce` software mixer with the STM32 RNG
-  peripheral for production-quality nonces.
-- Wire up per-PTT session keying — currently nonces are persistent across
-  power cycles only. For deployment, generate a fresh nonce on PTT-down,
-  send it in the voice header, and reset the superframe counter.
+After flashing and power-on:
 
-## Layout
+1. **Menu → Credits** → Second "Credits" entry opens the 16-slot key list
+2. **Green** on slot 1 → Enter T9 passphrase (e.g., `TEST`) → **Green** to save
+   - Slot now displays "Slot 1" with some visible characters from your passphrase
+3. **Menu → Channel details** on a **digital channel** → Scroll to "Enc Key"
+4. Press **Right** to cycle to slot `1` → **Green** to confirm
+5. Main screen should show **"ENC"** badge in the bottom-right when that channel is active
+6. **On a second radio:** Repeat steps 1–4 with the same passphrase on slot 1
+7. **Test transmission:**
+   - Radio A keys up (PTT) on the encrypted channel
+   - Radio B should decode recognizable voice (if keys match)
+   - Without matching keys, Radio B receives noise/garbled audio
+
+**Test setups only** — verify both radios are isolated from RF spectrum (screened room, dummy load, attenuators) before attempting any transmission.
+
+## Future Enhancements (Not Yet Implemented)
+
+- **Per-PTT session keying** — Currently nonces persist across power cycles. Production would generate fresh nonces on each PTT event, send in voice header, and reset superframe counter
+- **M17 encryption** — M17 mode currently does not support encryption (unlike DMR)
+- **Localization** — "Enc Keys" currently appears as a duplicate "Credits" menu entry. Would require adding language strings to `uiLocalisation.h` and all language files
+- **RNG peripheral** — Replace software-based nonce generator with STM32 RNG peripheral for higher quality randomness
+- **PBKDF2 tuning** — Adjust `PBKDF2_ITERATIONS` in `kdf.h` if passphrase entry feels too slow or too fast
+
+## Repository Structure
 
 ```
-opengd77-aes-patch/
-├─ README.md                 — this file
-├─ setup.ps1                 — entry point
-├─ apply_mods.py             — anchored patcher
-└─ new_files/
-   ├─ source/
-   │  ├─ crypto/             — aes.c sha256.c kdf.c dmr_crypto.c key_storage.c enc_indicator.c
-   │  └─ user_interface/     — menuKeyManagement.c menuKeyEntry.c
-   └─ include/
-      └─ crypto/             — matching headers
+sneaky390/
+├─ README.md                              — Main documentation (building, features, legality)
+├─ Patcher/
+│  ├─ README.md                           — This file
+│  ├─ setup.ps1                           — Entry point (applies patcher to OpenGD77 source)
+│  ├─ apply_mods.py                       — Automated patcher (integrates enhancements)
+│  └─ new_files/
+│     ├─ source/
+│     │  ├─ crypto/
+│     │  │  ├─ aes.c
+│     │  │  ├─ sha256.c
+│     │  │  ├─ kdf.c                      — PBKDF2 key derivation
+│     │  │  ├─ dmr_crypto.c               — Encryption/decryption logic
+│     │  │  ├─ key_storage.c
+│     │  │  └─ enc_indicator.c            — "ENC" badge rendering
+│     │  └─ user_interface/
+│     │     ├─ menuKeyManagement.c        — Key slot management UI
+│     │     └─ menuKeyEntry.c             — Passphrase/hex key entry UI
+│     └─ include/
+│        └─ crypto/                       — Matching header files (.h)
+├─ MDUV380_firmware/                      — OpenGD77 firmware tree (populated by patcher)
+├─ license.txt                            — BSD-3-Clause license
+└─ prepare.bat                            — AMBE placeholder generator
+
 ```
+
+## Credits
+
+**Johnny Bravo** — AES-256 encryption implementation, M17 digital mode integration, GPS waypoints, UI enhancements, firmware optimizations, and this patcher
+
+**OpenGD77 Team** — Base firmware, DMR architecture, FM support, and original UI framework
+
+## License
+
+This patcher and all source modifications are distributed under the BSD-3-Clause license (see `license.txt`). OpenGD77 and its dependencies retain their original licenses. See the OpenGD77 repository for upstream licensing details.
