@@ -1,7 +1,5 @@
 # OpenGD77 AES-256 Encryption Patch (STM32 / OpenMDUV380)
 
-**Developer:** Johnny Bravo
-
 Adds AES-256-CTR voice encryption to the OpenMDUV380 firmware for the TYT MD-UV380 / MD-UV390 / MD-UV390 Plus, Retevis RT-3S, and Baofeng DM-1701 / Retevis RT-84.
 
 This patcher is used to apply encryption, M17 mode, and other enhancements to the official OpenGD77 MDUV380 firmware distribution. It integrates cleanly with the existing OpenGD77 source without modifying unrelated functionality.
@@ -64,7 +62,9 @@ The enhancements are additive — existing OpenGD77 users can apply this patch t
 
 ## Apply the Patcher
 
-From the root of the sneaky390 repository:
+**Only needed if using OpenGD77 source newer than January 31, 2026.** If using the included MDUV380_firmware folder, skip this step.
+
+From the root of the super90 repository:
 
 ```powershell
 powershell -ExecutionPolicy Bypass -File .\Patcher\setup.ps1 `
@@ -130,13 +130,13 @@ If your radio runs out of storage after loading this firmware, user codeplug dat
 
 After flashing and power-on:
 
-1. **Menu → Credits** → Second "Credits" entry opens the 16-slot key list
-2. **Green** on slot 1 → Enter T9 passphrase (e.g., `TEST`) → **Green** to save
-   - Slot now displays "Slot 1" with some visible characters from your passphrase
+1. **Menu → Enc Key** → Opens the 16-slot encryption key management menu
+2. **Green** on an empty slot → Enter T9 passphrase (e.g., `TEST`) → **Green** to save
+   - Slot now displays with your saved key
 3. **Menu → Channel details** on a **digital channel** → Scroll to "Enc Key"
 4. Press **Right** to cycle to slot `1` → **Green** to confirm
-5. Main screen should show **"ENC"** badge in the bottom-right when that channel is active
-6. **On a second radio:** Repeat steps 1–4 with the same passphrase on slot 1
+5. Main screen should show **"ENC"** badge in the bottom-right corner when that encrypted channel is active
+6. **On a second radio:** Repeat steps 1–4 with the same passphrase in slot 1
 7. **Test transmission:**
    - Radio A keys up (PTT) on the encrypted channel
    - Radio B should decode recognizable voice (if keys match)
@@ -155,7 +155,7 @@ After flashing and power-on:
 ## Repository Structure
 
 ```
-sneaky390/
+super90/
 ├─ README.md                              — Main documentation (building, features, legality)
 ├─ Patcher/
 │  ├─ README.md                           — This file
@@ -175,18 +175,14 @@ sneaky390/
 │     │     └─ menuKeyEntry.c             — Passphrase/hex key entry UI
 │     └─ include/
 │        └─ crypto/                       — Matching header files (.h)
-├─ MDUV380_firmware/                      — OpenGD77 firmware tree (populated by patcher)
+├─ MDUV380_firmware/                      — OpenGD77 firmware tree (pre-patched with Super90 enhancements)
 ├─ license.txt                            — BSD-3-Clause license
 └─ prepare.bat                            — AMBE placeholder generator
 
 ```
 
-## Credits
-
-**Johnny Bravo** — AES-256 encryption implementation, M17 digital mode integration, GPS waypoints, UI enhancements, firmware optimizations, and this patcher
-
-**OpenGD77 Team** — Base firmware, DMR architecture, FM support, and original UI framework
-
 ## License
 
 This patcher and all source modifications are distributed under the BSD-3-Clause license (see `license.txt`). OpenGD77 and its dependencies retain their original licenses. See the OpenGD77 repository for upstream licensing details.
+
+The included MDUV380_firmware directory contains firmware enhancements based on OpenGD77 MDUV380 version 20260131, distributed under the same BSD-3-Clause terms.

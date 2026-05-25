@@ -1,8 +1,6 @@
-# Sneaky390 OpenGD77 Enhanced Firmware
+# Super90 OpenGD77 Enhanced Firmware
 
 Enhanced DMR/M17 firmware for STM32F405VGT-based transceivers (TYT MD-UV380/390, Retevis RT-3S, Baofeng DM-1701/RT-84) with AES-256 encryption, M17 digital mode support, GPS waypoints, and additional UI improvements.
-
-**Developer:** Johnny Bravo
 
 ## Overview
 
@@ -27,15 +25,44 @@ The firmware is stable and well-tested. It provides:
 
 Primary testing has been on the TYT MD-UV390 5W, but should work on all listed compatible radios.
 
-## ⚠️ Important Warnings
+## ⚠️ CRITICAL WARNINGS — READ BEFORE FLASHING
 
-### Firmware Size & Storage
-**This firmware is significantly larger than the base OpenGD77** due to added features including AES-256 encryption library, M17 codec, and enhanced UI. Available flash memory on supported radios is limited. Carefully verify your radio's specifications before flashing. Some radios may have limited flash available for user codeplug data after loading this firmware.
+### ⚠️ STM32F405VGT Transceivers ONLY
+**This firmware is designed exclusively for STM32F405VGT-based radios.** Do NOT attempt to flash on other hardware:
+- **TYT MD-UV380 / MD-UV390 / MD-UV390 Plus** ✓ Compatible
+- **Retevis RT-3S** ✓ Compatible
+- **Baofeng DM-1701 / Retevis RT-84** ✓ Compatible
+- **GD-77, GD-77S, MD-380, MD-390, or any other radios** ✗ NOT COMPATIBLE — Will brick the radio
 
-### Legal Considerations - Read Carefully
+Flashing incompatible hardware will **permanently disable your radio.** Verify your exact radio model before proceeding.
+
+### ⚠️ Firmware Size & Flash Storage Limitations
+**This firmware is significantly larger than base OpenGD77** due to AES-256 encryption library, M17 codec, and enhanced UI. 
+
+**Storage impact:**
+- Firmware occupies ~1 MB of the available ~1 MB total flash
+- **After flashing, user codeplug data space is severely limited**
+- Some radios may have insufficient remaining flash for full contact lists, zones, and settings
+- Each radio model has different available storage — verify specifications carefully
+
+**Before flashing:**
+1. Check your radio's total flash capacity (usually found in service manual)
+2. Verify available free space after firmware load
+3. Plan your codeplug size accordingly (fewer contacts/zones may be required)
+
+### ⚠️ BACKUP YOUR RADIO BEFORE FLASHING
+**Always back up your radio's current firmware and codeplug** before attempting any flash operation:
+1. Connect radio in firmware-update mode
+2. Use OpenGD77 CPS **Extras → Read Device** to save your current firmware and settings
+3. Save backups to a safe location on your computer
+4. Keep backups of your original factory firmware if possible
+
+If flashing fails or behaves unexpectedly, you will need the backup to recover your radio. **Failure to backup could result in permanent loss of your radio's configuration and functionality.**
+
+### Legal Considerations — Read Carefully
 - **Encryption legality varies by jurisdiction.** AES-256 encryption is provided for testing on shielded/test setups and commercial spectrum only. Using encryption on amateur radio frequencies is **prohibited in most jurisdictions** (including the USA, Canada, and most European nations). Violating these regulations can result in significant legal penalties.
 - **M17 is an open-source digital mode** requiring no proprietary licenses, unlike DMR. However, regulatory approval and licensing requirements still apply depending on your location and use case.
-- **Users are entirely responsible for compliance** with local regulations. Neither the developer nor the OpenGD77 project assumes any liability for user actions or regulatory violations.
+- **Users are entirely responsible for compliance** with local regulations. Neither the OpenGD77 project assumes any liability for user actions or regulatory violations.
 
 ## Key Features vs OpenGD77
 
@@ -82,18 +109,32 @@ Primary testing has been on the TYT MD-UV390 5W, but should work on all listed c
 
 ## Building the Firmware
 
-### Prerequisites
+### Quick Path: Using Pre-Patched MDUV380_Firmware (Recommended)
+
+The included `MDUV380_firmware` folder already contains all Super90 enhancements based on OpenGD77 MDUV380 firmware version 20260131. **If you are using firmware from January 31, 2026 or earlier, skip the patcher and build directly:**
+
+Prerequisites:
+- **Windows 10 or 11**
+- **STM32CubeIDE** (2.1+) — download from [st.com](https://www.st.com/en/development-tools/stm32cubeide.html)
+
+Go directly to [Step 2: Generate AMBE Placeholder](#step-2-generate-ambe-placeholder-if-not-done-by-setup.ps1).
+
+### Alternative Path: Patching Newer OpenGD77 Source
+
+**Only use the patcher if you have a newer OpenGD77 MDUV380 source** (released after January 31, 2026).
+
+Prerequisites:
 - **Windows 10 or 11**
 - **STM32CubeIDE** (2.1+) — download from [st.com](https://www.st.com/en/development-tools/stm32cubeide.html)
 - **Python 3.9+** (on system PATH) — used by the patcher
-- **OpenGD77 MDUV380 source tree** — download the official `.zip` from [opengd77.com](https://opengd77.com)
+- **OpenGD77 MDUV380 source tree** — download the official `.zip` from [opengd77.com](https://opengd77.com) (version 20260131 or newer)
 
-### Step 1: Prepare the Source Tree
+#### Apply the Patcher
 
 Extract the official OpenGD77 MDUV380 source `.zip` file. The `Patcher` folder in this repository contains a setup script that will automatically apply all enhancements.
 
 ```powershell
-cd path\to\sneaky390-repo
+cd path\to\super90-repo
 powershell -ExecutionPolicy Bypass -File .\Patcher\setup.ps1 `
     -Repo C:\path\to\OpenGD77_MDUV380_DM1701_YYYYMMDD
 ```
@@ -157,11 +198,11 @@ For general OpenGD77 functionality, UI navigation, contacts management, and zone
 ### Enhanced Features Quick Start
 
 **Encryption Keys**
-1. **Menu → Credits** (second "Credits" entry) → Opens 16-slot encryption key list
-2. **Green** on an empty slot → Enter T9 passphrase (e.g., "TEST") or **Right** to enter 64-char hex
-3. **Green** to save
-4. In **Channel details**, scroll to "Enc Key" and set to your slot number
-5. The "ENC" badge appears on the main screen when that channel is active
+1. **Menu → Enc Key** → Opens 16-slot encryption key management
+2. **Green** on an empty slot → Enter T9 passphrase (e.g., "TEST") or **Right** to enter 64-character hex key
+3. **Green** to save the key
+4. In **Channel details** on a digital channel, scroll to "Enc Key" and set to your slot number (1-16)
+5. The "ENC" badge appears on the main screen when that encrypted channel is active
 
 **M17 Mode**
 - Use **SK2 + STAR** (in VFO mode) or standard mode selector on digital channels to cycle through DMR ↔ M17 ↔ FM
@@ -176,9 +217,7 @@ For general OpenGD77 functionality, UI navigation, contacts management, and zone
 
 This firmware is distributed under the same BSD-3-Clause license as OpenGD77 (see `license.txt`). All source code modifications are provided without warranty.
 
-**Key contributors:**
-- **Johnny Bravo** — AES-256 encryption, M17 integration, GPS waypoints, UI enhancements, and memory optimizations
-- **OpenGD77 team** — Base firmware architecture and DMR/FM implementation
+This enhanced distribution includes AES-256 encryption, M17 digital mode, GPS waypoints, and various UI and memory optimizations built on top of the OpenGD77 base firmware.
 
 For details on OpenGD77 original contributors and licensing, see the official [OpenGD77 repository](https://github.com/rogerclarkmelbourne/OpenGD77).
 	
