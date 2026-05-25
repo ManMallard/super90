@@ -1087,6 +1087,33 @@ void applicationMainTask(void)
 				    (currentMenu != UI_POWER_OFF) && (currentMenu != UI_SPLASH_SCREEN) &&
 				    (currentMenu != UI_TX_SCREEN) && (currentMenu != MENU_CALIBRATION))
 				{
+					/* Wake the radio fully out of eco/power-save BEFORE touching
+					 * the AT1846 / HR-C6000.  This mirrors what the normal PTT
+					 * path does (see rxPowerSavingSetState() call further down
+					 * in the else-if block) and is what was previously missing
+					 * from the call-signal path.
+					 *
+					 * Why it matters: with "all sounds off" (audioPromptMode ==
+					 * AUDIO_PROMPT_MODE_SILENT) the eco state machine spends
+					 * more time in deep sleep because there is no beep traffic
+					 * keeping the audio peripherals warm.  In that state, going
+					 * straight to trxEnableTransmission()/trxSetTone1() writes
+					 * the AT1846 tone-1 register against a half-powered chip
+					 * and the modulator never carries the tone — i.e. the call
+					 * signal silently fails.  With sounds enabled the peripheral
+					 * is usually already awake from a recent key beep, which is
+					 * why the chord appears to "work when sounds are on but not
+					 * when they're off". */
+					rxPowerSavingSetState(ECOPHASE_POWERSAVE_INACTIVE);
+
+					/* Defensive: kill any in-flight beep melody so the audio
+					 * amp / FM-mute mux can't race with the TX tone routing in
+					 * radioSetTone1().  Cheap no-op when nothing is playing. */
+					if (melody_play != NULL)
+					{
+						soundStopMelody();
+					}
+
 					/* Initialise state first, set the flag LAST so the tick
 					 * never sees a partially-initialised state machine. */
 					s_callSigMelodyIdx  = 2; /* first pair consumed below */

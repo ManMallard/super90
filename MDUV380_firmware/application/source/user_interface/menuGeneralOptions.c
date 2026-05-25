@@ -310,7 +310,10 @@ static void updateScreen(bool isFirstRun)
 							break;
 #endif
 						case GPS_MODE_ON:
-							rightSideConst = currentLanguage->on;// On all the time
+							/* GPS powered, no NMEA dump, no flash log — labelled
+							 * "NO LOG" so the SK2+GREEN cycle (NO LOG → NMEA →
+							 * Log → NO LOG) reads consistently in the popup. */
+							snprintf(rightSideVar, SCREEN_LINE_BUFFER_SIZE, "%s", "NO LOG");
 							break;
 						case GPS_MODE_OFF:
 							rightSideConst = currentLanguage->off;
