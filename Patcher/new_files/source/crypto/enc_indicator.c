@@ -1,6 +1,6 @@
 /*
  * Renders the "ENC" badge in the bottom-right area of the main screens
- * when the active channel is digital and has a non-zero encKeyIndex.
+ * when the active channel is DMR or M17 and has a non-zero encKeyIndex.
  *
  * States:
  *   1. Channel encKeyIndex == 0           -> nothing shown
@@ -27,6 +27,7 @@
 #include "hardware/HR-C6000.h"    /* slotState, DMR_STATE_RX_* */
 #include "hardware/HX8353E.h"     /* displayPrintAt, FONT_SIZE_1 */
 #include "io/LEDs.h"              /* LedWrite, LED_RED, LED_GREEN */
+#include "user_interface/uiGlobals.h" /* DISPLAY_Y_POS_CONTACT_TX */
 #include <stddef.h>
 
 extern CodeplugChannel_t *currentChannelData;
@@ -65,48 +66,53 @@ void enc_indicator_render(void)
     aes_patch_engage_for_current_channel();
 
     if (currentChannelData == NULL) goto end_no_warn;
-    if (currentChannelData->chMode != RADIO_MODE_DIGITAL) goto end_no_warn;
+    /* Show ENC badge for both DMR and M17 — both use the same key slot. */
+    if (currentChannelData->chMode != RADIO_MODE_DIGITAL &&
+        currentChannelData->chMode != RADIO_MODE_M17) goto end_no_warn;
 
     uint8_t idx = currentChannelData->encKeyIndex;
     if (idx == 0 || idx > KEY_SLOT_COUNT) goto end_no_warn;
 
     if (!keystore_is_set(idx))
     {
-        /* AES patch: assigned slot is empty - audio transmits IN THE CLEAR.
-         * Show warning ONLY while PTT is pressed (trxTransmissionEnabled),
-         * and on the SECOND line so we don't collide with the normal header. */
+        /* Assigned slot is empty — audio transmits IN THE CLEAR.
+         * Show warning ONLY while PTT is pressed (trxTransmissionEnabled).
+         * Position: one font row (8 px) below the talk-group / contact line,
+         * shifted right by 4 char-cells (24 px @ 6 px/char) and down 5 px,
+         * so it sits clear of the TG number on the left and reads:
+         *   TOT timer → TG number → ENC warning → channel name. */
         if (trxTransmissionEnabled) {
-            displayPrintAt(0, 10, "ENC ACTIVE NO KEY NO ENC", FONT_SIZE_1);
+            displayPrintAt(24, DISPLAY_Y_POS_CONTACT_TX + 13, "ENC ACTIVE NO KEY NO ENC", FONT_SIZE_1);
         }
         goto end_no_warn;
     }
 
-    /* AES patch: UNENC RX warning — populated PTT-mode slot but incoming
-     * call has no magic byte (so it's plaintext). Show badge on second line
-     * and alternate the LEDs so the user notices even if not looking at the
-     * screen. ~250ms half-period -> ~2Hz flash. */
-    if (unenc_rx_warning_should_show())
+    /* UNENC RX warning uses DMR slot-state and LC magic byte — DMR only. */
+    if (currentChannelData->chMode == RADIO_MODE_DIGITAL)
     {
-        displayPrintAt(0, 10, "UNENC RX", FONT_SIZE_1);
-        uint32_t t = ticksGetMillis();
-        if ((t / 250) & 1) {
-            LedWrite(LED_RED, 1);
-            LedWrite(LED_GREEN, 0);
-        } else {
-            LedWrite(LED_RED, 0);
-            LedWrite(LED_GREEN, 1);
+        if (unenc_rx_warning_should_show())
+        {
+            displayPrintAt(0, 10, "UNENC RX", FONT_SIZE_1);
+            uint32_t t = ticksGetMillis();
+            if ((t / 250) & 1) {
+                LedWrite(LED_RED, 1);
+                LedWrite(LED_GREEN, 0);
+            } else {
+                LedWrite(LED_RED, 0);
+                LedWrite(LED_GREEN, 1);
+            }
+            s_unencFlashActive = 1;
+            /* Continue to also draw the standard ENC badge. */
         }
-        s_unencFlashActive = 1;
-        /* Continue to also draw the standard ENC badge. */
-    }
-    else if (s_unencFlashActive)
-    {
-        /* Warning just ended — clear the LEDs we forced on. The radio's
-         * normal RX/TX LED logic will re-assert correct state on the next
-         * tick. */
-        LedWrite(LED_RED, 0);
-        LedWrite(LED_GREEN, 0);
-        s_unencFlashActive = 0;
+        else if (s_unencFlashActive)
+        {
+            /* Warning just ended — clear the LEDs we forced on. The radio's
+             * normal RX/TX LED logic will re-assert correct state on the next
+             * tick. */
+            LedWrite(LED_RED, 0);
+            LedWrite(LED_GREEN, 0);
+            s_unencFlashActive = 0;
+        }
     }
 
     /* FONT_SIZE_1 = font_6x8: 3 chars * 6 px wide = 18 px; 8 px tall.
