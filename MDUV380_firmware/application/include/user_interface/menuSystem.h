@@ -339,6 +339,7 @@ enum MENU_SCREENS
 	MENU_THEME_ITEMS_BROWSER,
 	MENU_COLOUR_PICKER,
 #endif
+	UI_DUAL_WATCH_CHANNEL,    /* channel-mode A/B dual watch (uiDualWatch.c) */
 	NUM_MENU_ENTRIES
 };
 
@@ -355,6 +356,7 @@ enum CHANNEL_SCREEN_QUICK_MENU_ITEMS
 	CH_SCREEN_QUICK_MENU_TALKAROUND,
 	CH_SCREEN_QUICK_MENU_ROAMING,
 	CH_SCREEN_QUICK_MENU_AUDIO_MUTE,
+	CH_SCREEN_QUICK_MENU_DUAL_WATCH,   /* opens UI_DUAL_WATCH_CHANNEL */
 	NUM_CH_SCREEN_QUICK_MENU_ITEMS
 };
 
@@ -443,6 +445,7 @@ menuStatus_t uiVFOMode(uiEvent_t *event, bool isFirstRun);
 menuStatus_t uiVFOModeQuickMenu(uiEvent_t *event, bool isFirstRun);
 menuStatus_t uiChannelMode(uiEvent_t *event, bool isFirstRun);
 menuStatus_t uiChannelModeQuickMenu(uiEvent_t *event, bool isFirstRun);
+menuStatus_t uiDualWatch(uiEvent_t *event, bool isFirstRun);
 menuStatus_t uiCPS(uiEvent_t *event, bool isFirstRun);
 menuStatus_t uiSplashScreen(uiEvent_t *event, bool isFirstRun);
 menuStatus_t uiPowerOff(uiEvent_t *event, bool isFirstRun);

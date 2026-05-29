@@ -2276,6 +2276,9 @@ static void updateQuickMenuScreen(bool isFirstRun)
 					leftSide = currentLanguage->mute;
 					rightSideConst = (uiDataGlobal.QuickMenu.tmpAudioMute ? currentLanguage->yes : currentLanguage->no);
 					break;
+				case CH_SCREEN_QUICK_MENU_DUAL_WATCH:
+					rightSideConst = currentLanguage->dual_watch;
+					break;
 				default:
 					buf[0] = 0;
 			}
@@ -2505,6 +2508,14 @@ static void handleQuickMenuEvent(uiEvent_t *ev)
 					return;
 				}
 					break;
+
+				case CH_SCREEN_QUICK_MENU_DUAL_WATCH:
+					/* Hand off to the channel-mode Dual Watch screen.  Pop the
+					 * quick menu first so a RED from the dual watch returns
+					 * straight to the channel screen (not to this list). */
+					menuSystemPopPreviousMenu();
+					menuSystemPushNewMenu(UI_DUAL_WATCH_CHANNEL);
+					return;
 
 				default:
 					// CH_SCREEN_QUICK_MENU_FILTER_FM

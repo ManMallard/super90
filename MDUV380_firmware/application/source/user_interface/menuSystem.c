@@ -110,6 +110,7 @@ menuDataGlobal_t menuDataGlobal =
 				NULL,// Theme items browser
 				NULL,// Colour picker
 #endif
+				NULL,// UI_DUAL_WATCH_CHANNEL
 		}
 };
 
@@ -170,6 +171,7 @@ static menuFunctionData_t menuFunctions[] =
 		{ menuThemeItemsBrowser,    NULL, NULL, 0 },
 		{ menuColourPicker,         NULL, NULL, 0 },
 #endif
+		{ uiDualWatch,              NULL, NULL, 0 },  /* UI_DUAL_WATCH_CHANNEL */
 };
 
 
