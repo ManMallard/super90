@@ -56,19 +56,32 @@ typedef enum { FOCUS_ZONE = 0, FOCUS_CHA = 1, FOCUS_CHB = 2, FOCUS_COUNT = 3 } D
 #define DW_SWAP_MS    135u  /* A<->B alternation period — matches VFO dual scan */
 #define DW_SCAN_MS     45u  /* B-scan step period when sweeping the zone */
 
-/* All state in .bss — guaranteed zero on boot but the
- * uiDualWatch(isFirstRun=true) path re-initialises everything anyway. */
-static int16_t        s_zoneIdx;
-static CodeplugZone_t s_zone;            /* expanded zone (channels[], count, ...) */
-static int16_t        s_chAIdx;          /* index of A within s_zone */
-static int16_t        s_chBIdx;          /* index of B within s_zone */
-static DwFocus_t      s_focus;
-static uint8_t        s_activeAB;        /* 0 = A keyed, 1 = B keyed */
-static uint32_t       s_lastSwapMs;
-static bool           s_scanningB;
-static int8_t         s_scanDir;         /* +1 forward, -1 backward */
-static uint32_t       s_lastScanStepMs;
-static int16_t        s_originalChannelNum;  /* absolute channel num to restore on exit */
+/* s_zone holds the expanded zone (name + channels[80] + counts) — ~188 B.
+ * Moved to CCMRAM to claw back the largest single chunk Dual Watch consumes
+ * from the very tight .bss slack (~200 B at branch tip).  Safe in CCM
+ * because the lazy-init pattern guarantees write-before-read: the menu's
+ * isFirstRun branch always calls codeplugZoneGetDataForNumber(&s_zone)
+ * before any handler touches its fields, so the lack of CCMRAM zero-init
+ * at boot is harmless (same pattern as melody_generic, ambeData, screen
+ * notification buffer, and the GPS waypoint bank).
+ *
+ * The smaller state ints stay in .bss for guaranteed zero on boot.
+ * Re-entering Dual Watch always re-initialises them in isFirstRun anyway
+ * but the zero-init means a stray reference from elsewhere in the
+ * codebase — or a hypothetical bug that reads them before isFirstRun —
+ * sees defined values rather than garbage. */
+static __attribute__((section(".ccmram"))) CodeplugZone_t s_zone;
+
+static int16_t   s_zoneIdx;
+static int16_t   s_chAIdx;          /* index of A within s_zone */
+static int16_t   s_chBIdx;          /* index of B within s_zone */
+static DwFocus_t s_focus;
+static uint8_t   s_activeAB;        /* 0 = A keyed, 1 = B keyed */
+static uint32_t  s_lastSwapMs;
+static bool      s_scanningB;
+static int8_t    s_scanDir;         /* +1 forward, -1 backward */
+static uint32_t  s_lastScanStepMs;
+static int16_t   s_originalChannelNum;  /* absolute channel num to restore on exit */
 
 extern CodeplugZone_t currentZone;       /* defined in uiChannelMode */
 
