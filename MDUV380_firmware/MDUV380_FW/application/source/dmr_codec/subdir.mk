@@ -6,6 +6,7 @@
 # Add inputs and outputs from these tool invocations to the build variables 
 C_SRCS += \
 ../application/source/dmr_codec/codec.c \
+../application/source/dmr_codec/codec2.c \
 ../application/source/dmr_codec/codec_interface.c 
 
 S_UPPER_SRCS += \
@@ -13,6 +14,7 @@ S_UPPER_SRCS += \
 
 OBJS += \
 ./application/source/dmr_codec/codec.o \
+./application/source/dmr_codec/codec2.o \
 ./application/source/dmr_codec/codec_bin.o \
 ./application/source/dmr_codec/codec_interface.o 
 
@@ -21,6 +23,7 @@ S_UPPER_DEPS += \
 
 C_DEPS += \
 ./application/source/dmr_codec/codec.d \
+./application/source/dmr_codec/codec2.d \
 ./application/source/dmr_codec/codec_interface.d 
 
 
@@ -35,7 +38,7 @@ application/source/dmr_codec/codec_interface.o: ../application/source/dmr_codec/
 clean: clean-application-2f-source-2f-dmr_codec
 
 clean-application-2f-source-2f-dmr_codec:
-	-$(RM) ./application/source/dmr_codec/codec.cyclo ./application/source/dmr_codec/codec.d ./application/source/dmr_codec/codec.o ./application/source/dmr_codec/codec.su ./application/source/dmr_codec/codec_bin.d ./application/source/dmr_codec/codec_bin.o ./application/source/dmr_codec/codec_interface.cyclo ./application/source/dmr_codec/codec_interface.d ./application/source/dmr_codec/codec_interface.o ./application/source/dmr_codec/codec_interface.su
+	-$(RM) ./application/source/dmr_codec/codec.cyclo ./application/source/dmr_codec/codec.d ./application/source/dmr_codec/codec.o ./application/source/dmr_codec/codec.su ./application/source/dmr_codec/codec2.cyclo ./application/source/dmr_codec/codec2.d ./application/source/dmr_codec/codec2.o ./application/source/dmr_codec/codec2.su ./application/source/dmr_codec/codec_bin.d ./application/source/dmr_codec/codec_bin.o ./application/source/dmr_codec/codec_interface.cyclo ./application/source/dmr_codec/codec_interface.d ./application/source/dmr_codec/codec_interface.o ./application/source/dmr_codec/codec_interface.su
 
 .PHONY: clean-application-2f-source-2f-dmr_codec
 

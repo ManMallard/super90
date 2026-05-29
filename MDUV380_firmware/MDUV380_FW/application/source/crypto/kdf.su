@@ -1,2 +1,0 @@
-../application/source/crypto/kdf.c:16:13:hmac_sha256	360	static
-../application/source/crypto/kdf.c:49:6:pbkdf2_hmac_sha256	192	static

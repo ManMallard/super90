@@ -1,4 +1,0 @@
-../application/source/crypto/sha256.c:27:13:sha256_transform	4
-../application/source/crypto/sha256.c:45:6:sha256_init	1
-../application/source/crypto/sha256.c:55:6:sha256_update	3
-../application/source/crypto/sha256.c:68:6:sha256_final	5

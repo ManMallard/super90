@@ -1,6 +1,0 @@
-../application/source/user_interface/menuKeyEntry.c:143:12:unhex	4
-../application/source/user_interface/menuKeyEntry.c:67:13:render	9
-../application/source/user_interface/menuKeyEntry.c:287:14:menuKeyEntry	39
-../application/source/user_interface/menuKeyEntry.c:293:6:menuKeyEntry_passphrase	1
-../application/source/user_interface/menuKeyEntry.c:299:6:menuKeyEntry_hex	1
-../application/source/user_interface/menuKeyEntry.c:305:6:menuKeyEntry_label	1

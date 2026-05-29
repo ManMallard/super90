@@ -1,6 +1,0 @@
-../application/source/user_interface/menuKeyEntry.c:143:12:unhex	0	static
-../application/source/user_interface/menuKeyEntry.c:67:13:render	128	static
-../application/source/user_interface/menuKeyEntry.c:287:14:menuKeyEntry	64	static
-../application/source/user_interface/menuKeyEntry.c:293:6:menuKeyEntry_passphrase	0	static
-../application/source/user_interface/menuKeyEntry.c:299:6:menuKeyEntry_hex	0	static
-../application/source/user_interface/menuKeyEntry.c:305:6:menuKeyEntry_label	0	static
