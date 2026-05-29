@@ -29,6 +29,7 @@ C_SRCS += \
 ../application/source/user_interface/menuZoneList.c \
 ../application/source/user_interface/uiCPS.c \
 ../application/source/user_interface/uiChannelMode.c \
+../application/source/user_interface/uiDualWatch.c \
 ../application/source/user_interface/uiGlobals.c \
 ../application/source/user_interface/uiHotspot.c \
 ../application/source/user_interface/uiLocalisation.c \
@@ -68,6 +69,7 @@ OBJS += \
 ./application/source/user_interface/menuZoneList.o \
 ./application/source/user_interface/uiCPS.o \
 ./application/source/user_interface/uiChannelMode.o \
+./application/source/user_interface/uiDualWatch.o \
 ./application/source/user_interface/uiGlobals.o \
 ./application/source/user_interface/uiHotspot.o \
 ./application/source/user_interface/uiLocalisation.o \
@@ -107,6 +109,7 @@ C_DEPS += \
 ./application/source/user_interface/menuZoneList.d \
 ./application/source/user_interface/uiCPS.d \
 ./application/source/user_interface/uiChannelMode.d \
+./application/source/user_interface/uiDualWatch.d \
 ./application/source/user_interface/uiGlobals.d \
 ./application/source/user_interface/uiHotspot.d \
 ./application/source/user_interface/uiLocalisation.d \
