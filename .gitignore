@@ -1,0 +1,13 @@
+# Build output directories (STM32CubeIDE / Eclipse CDT)
+# These are regenerated on every build and should not be committed.
+Debug/
+Release/
+.claude/
+
+# Loose compiler/linker artifacts, in case of an in-tree build
+*.o
+*.d
+*.su
+*.cyclo
+*.elf
+*.map
